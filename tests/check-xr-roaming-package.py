@@ -19,6 +19,11 @@ def main():
     repo = Path(__file__).resolve().parents[1]
     package = repo / "feed/wrtmesh"
     makefile = (package / "Makefile").read_text()
+    package_definition = makefile.split("define Package/wrtmesh\n", 1)[1].split("\nendef", 1)[0]
+    dependencies = " ".join(line.strip().split("=", 1)[1]
+                            for line in package_definition.splitlines()
+                            if line.strip().startswith(("DEPENDS:=", "DEPENDS+=")))
+    assert "+rpcd" in dependencies.split(), "select rpcd explicitly to avoid the LuCI dependency cycle"
     preinst = makefile.split("define Package/wrtmesh/preinst\n", 1)[1].split("\nendef", 1)[0]
     preinst = preinst.replace("$$", "$")
     results = []

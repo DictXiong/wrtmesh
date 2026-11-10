@@ -20,7 +20,7 @@ define Package/wrtmesh
   URL:=https://github.com/DictXiong/wrtmesh
   PROVIDES:=xr-roaming
   DEPENDS:=+hostapd-utils +jq +curl +coreutils-timeout +flock +uci +ubus +uhttpd
-  DEPENDS+=+umdns +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +ucode-mod-rtnl +rpcd-mod-ucode +luci-mod-network
+  DEPENDS+=+umdns +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +ucode-mod-rtnl +rpcd +rpcd-mod-ucode +luci-mod-network
 endef
 
 define Package/wrtmesh/description
