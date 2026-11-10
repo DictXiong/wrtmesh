@@ -272,9 +272,11 @@ return baseclass.extend({
 		const ipv4 = station.ipv4 || hints?.getIPAddrByMACAddr(mac);
 		const ipv6 = station.ipv6 || hints?.getIP6AddrByMACAddr(mac);
 		const addresses = [ipv4, ipv6].filter(Boolean);
+		if (!name && !addresses.length)
+			return E('span', {}, ['?']);
 		return E('span', { class: 'wrtmesh-host' }, [
 			name ? E('span', {}, [name]) : null,
-			...(addresses.length ? addresses : [mac]).map(address =>
+			...addresses.map(address =>
 				E('small', { class: 'wrtmesh-secondary' }, [address]))
 		]);
 	},
