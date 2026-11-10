@@ -1,0 +1,59 @@
+name: Checks and packages
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SDK prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gawk gettext git jq libncurses-dev libssl-dev python3-setuptools rsync unzip zstd file curl
+      - name: Test roaming and package hooks
+        run: |
+          sudo python3 tests/check-xr-roaming-package.py
+          sudo python3 tests/test-xr-roaming.py
+      - name: Build and sign APK
+        run: python3 ci/build-package.py --work "$RUNNER_TEMP/wrtmesh-sdk" --output artifacts --jobs "$(nproc)"
+      - name: Verify APK name transition
+        run: |
+          sudo python3 tests/test-apk-upgrade.py \
+            --apk "$RUNNER_TEMP/wrtmesh-sdk/sdk/staging_dir/host/bin/apk" \
+            --package "artifacts/wrtmesh-$(cat VERSION)-r1.apk"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wrtmesh-apk
+          path: artifacts/*
+          if-no-files-found: error
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          name: wrtmesh-apk
+          path: artifacts
+      - name: Validate release tag
+        run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: artifacts/*
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* --verify-tag \
+            --title "wrtmesh $GITHUB_REF_NAME" --notes-file "docs/releases/$GITHUB_REF_NAME.md"

@@ -1,0 +1,7 @@
+{
+	"luci-app-xrmesh": {
+		"description": "View Mesh status and discover peers",
+		"read": { "ubus": { "xrmesh": [ "status", "discover", "scan", "identify" ] } },
+		"write": { "ubus": { "xrmesh": [ "save", "remove" ] } }
+	}
+}

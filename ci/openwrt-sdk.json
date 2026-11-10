@@ -1,0 +1,9 @@
+{
+  "release": "25.12.0",
+  "target": "x86/64",
+  "url": "https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/openwrt-sdk-25.12.0-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst",
+  "sha256": "9f371906ce6d2f95418f69fac06df58bf9df0ffc4abed6206c30f1b547fcfc12",
+  "packages_feed": "https://github.com/openwrt/packages.git^506c37591d7cd9b3cfd812e69e708349268f9865",
+  "base_feed": "https://github.com/openwrt/openwrt.git^4da53efc2fe744601e6189492dbd06b8930d72b8",
+  "luci_feed": "https://github.com/openwrt/luci.git^27a9c0c94264063894d40420956696d19b175744"
+}
