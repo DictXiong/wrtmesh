@@ -101,20 +101,6 @@
 	fill: #64748b;
 }
 
-.wrtmesh-legend {
-	display: flex;
-	align-items: center;
-	gap: .45rem;
-	font-size: .9em;
-}
-
-.wrtmesh-swatch {
-	width: 1.5em;
-	height: 2px;
-	border-radius: 1px;
-	background: var(--wrtmesh-accent);
-}
-
 .wrtmesh-paths {
 	border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
 	padding-top: .5rem;

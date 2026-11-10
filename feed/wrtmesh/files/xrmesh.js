@@ -233,9 +233,6 @@ return baseclass.extend({
 		const bus = sharedEthernet(local.bridge_mac, links);
 		return E('div', { class: 'wrtmesh-topology' }, [
 			diagram(local, peers, Array.from(gateways.values()), links, bus),
-			bus ? E('p', { class: 'wrtmesh-legend' }, [
-				E('span', { class: 'wrtmesh-swatch', 'aria-hidden': 'true' }), _('Shared Ethernet')
-			]) : null,
 			links.length ? pathDetails('local', _('Bridge and port details'), [
 				E('p', { class: 'cbi-section-descr' }, _('Paths reflect local bridge and port observations. A switch may be between devices.')),
 				E('ul', {}, links.map(link => E('li', {}, [
