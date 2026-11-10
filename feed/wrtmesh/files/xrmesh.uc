@@ -43,12 +43,6 @@ function discover() {
 		if (!ctx.lan || record.iface != ctx.lan.device || record.port != 80)
 			continue;
 		let addresses = type(record.ipv4) == 'string' ? [record.ipv4] : mesh.array(record.ipv4);
-		// umdns may publish the maintenance alias as the interface's A record.
-		// The management hint must pass the same on-LAN checks as every address.
-		let hints = filter(mesh.array(record.txt), value =>
-			type(value) == 'string' && substr(value, 0, 8) == 'address=');
-		if (length(hints) == 1)
-			push(addresses, substr(hints[0], 8));
 		if (!length(addresses) && type(record.host) == 'string' && match(record.host, /^xr-[0-9a-f]{12}\.local$/)) {
 			// umdns answers a service PTR with an SRV record. Its A record may still be absent.
 			mesh.call(ctx.bus, 'umdns', 'query', { question: record.host, interface: ctx.lan.device, type: 1 });

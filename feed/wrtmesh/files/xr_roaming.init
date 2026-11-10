@@ -3,11 +3,9 @@ START=95
 STOP=10
 USE_PROCD=1
 mesh_announce() {
- local mac host address
+ local mac host
  [ -r /sys/class/net/br-lan/address ] && read -r mac < /sys/class/net/br-lan/address || return 0
  host=xr-$(printf '%s' "$mac" | tr -d :)
- address=$(ubus -t 2 call network.interface.lan status 2>/dev/null |
-  jq -r '."ipv4-address"[0].address // empty')
  procd_open_data
  json_add_object mdns
  json_add_object xrmesh
@@ -15,9 +13,6 @@ mesh_announce() {
  json_add_string hostname "$host.local"
  json_add_string service _xr-roaming._tcp.local
  json_add_int port 80
- json_add_array txt
- [ -z "$address" ] || json_add_string "" "address=$address"
- json_close_array
  json_close_object
  json_close_object
  procd_close_data

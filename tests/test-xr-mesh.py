@@ -93,15 +93,6 @@ export function request(cmd, flags, args) {{
             'umdns:browse': {'_xr-roaming._tcp': {
                 'candidate': {'iface': 'br-lan.1', 'port': 80, 'ipv4': ['192.168.1.22', '192.168.2.1']},
                 'other-vlan': {'iface': 'br-guest', 'port': 80, 'ipv4': '192.168.1.23'},
-                'maintenance-alias': {'iface': 'br-lan.1', 'port': 80, 'ipv4': '192.168.250.21',
-                                      'txt': ['address=192.168.1.24']},
-                'off-link-hint': {'iface': 'br-lan.1', 'port': 80, 'ipv4': '192.168.250.22',
-                                  'txt': ['address=192.168.2.24']},
-                'ambiguous-hint': {'iface': 'br-lan.1', 'port': 80,
-                                   'txt': ['address=192.168.1.25', 'address=192.168.1.26']},
-                'wrong-interface-hint': {'iface': 'br-guest', 'port': 80,
-                                         'txt': ['address=192.168.1.27']},
-                'self-hint': {'iface': 'br-lan.1', 'port': 80, 'txt': ['address=192.168.1.20']},
             }},
         }
         (stage / 'bus.json').write_text(json.dumps(bus))
@@ -154,10 +145,7 @@ export function request(cmd, flags, args) {{
         station = data['peers'][0]['data']['stations'][0]
         assert data['peers'][0]['online'] and station['signal'] == -51
         assert (station['ipv4'], station['ipv6'], station['rx']) == ('192.168.1.42', None, 96070000)
-        assert rpc('discover')['candidates'] == [
-            {'address': '192.168.1.22', 'name': 'candidate'},
-            {'address': '192.168.1.24', 'name': 'maintenance-alias'},
-        ]
+        assert rpc('discover')['candidates'] == [{'address': '192.168.1.22', 'name': 'candidate'}]
         assert cgi('192.168.1.21')[0] == 200 and cgi('192.168.1.22')[0] == 403
         assert cgi('192.168.1.22', query='identity=1')[1]['bridge_mac'] == local_mac
         assert cgi('192.168.2.21', query='identity=1')[0] == 403

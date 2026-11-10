@@ -113,38 +113,6 @@ def main():
 
     check("unconfigured-profile-and-package-persistence-contract", defaults)
 
-    def announcement():
-        with tempfile.TemporaryDirectory(prefix="wrtmesh-mdns-") as tmp:
-            stage = Path(tmp)
-            (stage / "bridge-mac").write_text("02:00:00:00:00:01\n")
-            status = stage / "lan.json"
-            ubus = stage / "ubus"
-            ubus.write_text("#!/bin/sh\ncat " + shlex.quote(str(status)) + "\n")
-            ubus.chmod(0o700)
-            init = (package / "files/xr_roaming.init").read_text().replace(
-                "/sys/class/net/br-lan/address", str(stage / "bridge-mac"))
-            script = init + """
-procd_open_data() { :; }
-procd_close_data() { :; }
-json_add_object() { :; }
-json_close_object() { :; }
-json_add_array() { :; }
-json_close_array() { :; }
-json_add_int() { :; }
-json_add_string() { printf '%s|%s\\n' "$1" "$2"; }
-mesh_announce
-"""
-            env = dict(os.environ, PATH=str(stage) + ":" + os.environ["PATH"])
-            for address in ["192.168.1.20", None]:
-                status.write_text(json.dumps({"ipv4-address": [{"address": address}]} if address else {}))
-                result = subprocess.run(["sh", "-s"], input=script, text=True,
-                                        capture_output=True, env=env, timeout=5)
-                assert result.returncode == 0, result.stderr
-                assert "hostname|xr-020000000001.local" in result.stdout
-                assert ("|address=192.168.1.20" in result.stdout) is bool(address)
-
-    check("mdns-announces-netifd-management-address-and-handles-no-lease", announcement)
-
     if args.installed_root:
         def payload():
             root = args.installed_root.resolve()
