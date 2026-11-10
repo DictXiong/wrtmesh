@@ -27,7 +27,9 @@ function write(name, value) {
 
 function stations() {
 	let found = {}, truncated = false;
-	for (let obj in slice(bus?.list('hostapd.*') ?? [], 0, 64)) {
+	// A patterned ubus list returns method signatures instead of object names.
+	let objects = filter(bus?.list() ?? [], obj => substr(obj, 0, 8) == 'hostapd.');
+	for (let obj in slice(objects, 0, 64)) {
 		let status = mesh.call(bus, obj, 'get_status');
 		if (status.status != 'ENABLED' || !status.ssid)
 			continue;

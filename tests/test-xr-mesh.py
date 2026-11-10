@@ -56,7 +56,9 @@ config roaming 'main'
 import {{ readfile }} from 'fs';
 export function connect() {{
 	return {{
-		list: () => ['hostapd.ap-mld0'],
+		list: (pattern) => pattern == null
+			? ['network.interface.lan', 'hostapd.ap-mld0']
+			: [{{ get_status: {{}}, get_clients: {{}} }}],
 		call: (object, method, args) => {{
 			let db = json(readfile('{stage}/bus.json'));
 			if (object == 'network.device')
