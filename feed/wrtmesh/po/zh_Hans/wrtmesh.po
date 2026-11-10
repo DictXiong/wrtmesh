@@ -15,7 +15,7 @@ msgstr "有节点的站点数量超过上报上限，最多显示 256 个。"
 msgid "A peer can share station status without BSSIDs. Roaming uses only the BSSIDs approved here."
 msgstr "留空 BSSID 仍可共享站点状态。漫游仅使用在此确认的 BSSID。"
 
-msgid "Add peer"
+msgid "Add Mesh peer"
 msgstr "添加节点"
 
 msgid "Add the peer on both devices to exchange station and topology snapshots. Peer changes apply to this device."
@@ -93,6 +93,9 @@ msgstr "Mesh"
 msgid "Mesh peer"
 msgstr "Mesh 节点"
 
+msgid "Mesh peers"
+msgstr "Mesh 节点"
+
 msgid "Mesh request failed."
 msgstr "Mesh 请求失败。"
 
@@ -138,17 +141,11 @@ msgstr "节点 IPv4 地址"
 msgid "Peer status"
 msgstr "节点状态"
 
-msgid "Peers"
-msgstr "Mesh 节点"
-
 msgid "Port unknown"
 msgstr "网口未知"
 
 msgid "RX Rate"
 msgstr "接收速率"
-
-msgid "Remove"
-msgstr "移除"
 
 msgid "Remove peer"
 msgstr "移除节点"

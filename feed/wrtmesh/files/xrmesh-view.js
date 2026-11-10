@@ -146,7 +146,7 @@ return view.extend({
 					result(await removePeer(peer.bridge_mac));
 					ui.hideModal();
 					await this.refresh(true);
-				}) }, _('Remove'))
+				}) }, _('Remove peer'))
 			])
 		]);
 	},
@@ -160,7 +160,7 @@ return view.extend({
 			if (this.writable)
 				row.push(E('div', { class: 'wrtmesh-actions' }, [
 					E('button', { class: 'btn', click: () => this.editor(p, false) }, _('Edit')), ' ',
-					E('button', { class: 'btn cbi-button-negative', click: () => this.confirmRemove(p) }, _('Remove'))
+					E('button', { class: 'btn cbi-button-negative', click: () => this.confirmRemove(p) }, _('Remove peer'))
 				]));
 			return row;
 		});
@@ -173,7 +173,7 @@ return view.extend({
 		]);
 		const truncated = data?.local?.truncated || data?.peers?.some(peer => peer.data?.truncated);
 		return E('div', {}, [
-			section(_('Peers'), [table(headers, peers, _('No peers configured.'))]),
+			section(_('Mesh peers'), [table(headers, peers, _('No peers configured.'))]),
 			section(_('Mesh topology'), [xrmesh.topology(data)]),
 			section(_('Associated Stations'), [
 				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached the 256-station reporting limit.')) : null,
@@ -193,7 +193,7 @@ return view.extend({
 				E('h2', {}, _('Mesh')),
 				writable ? E('div', { class: 'wrtmesh-actions' }, [
 					E('button', { class: 'btn cbi-button-action', click: this.action(() => this.search()) }, _('Discover peers')),
-					E('button', { class: 'btn cbi-button-add', click: () => this.editor(null, false) }, _('Add peer'))
+					E('button', { class: 'btn cbi-button-add', click: () => this.editor(null, false) }, _('Add Mesh peer'))
 				]) : null
 			]),
 			E('p', { class: 'cbi-section-descr' }, _('Add the peer on both devices to exchange station and topology snapshots. Peer changes apply to this device.')),
