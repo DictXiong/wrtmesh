@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.1.0-r1.apk
+apk add ./wrtmesh-6.1.0-r2.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/xr_roaming` and
@@ -37,6 +37,11 @@ Open **Network → Mesh** to discover, add, edit or remove peers. Discovery uses
 OpenWrt's `umdns` on the management LAN. A node can also be entered manually by
 LAN IPv4 address and bridge MAC. Review any discovered BSSIDs before saving.
 Enroll peers on both devices to exchange station and topology snapshots.
+
+On interfaces with an offline maintenance alias, umdns may publish that alias
+as its A record. The service also advertises the management LAN address in TXT.
+Discovery accepts a single address hint only on the expected interface and
+management subnet. Peer identity and BSSIDs still require review before saving.
 
 The list includes previously provisioned peers. LuCI stores local additions,
 edits and removals in `/etc/config/xr_mesh`. A removal there also masks an older

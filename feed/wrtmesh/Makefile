@@ -5,7 +5,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wrtmesh
 PKG_VERSION:=$(strip $(shell cat $(WRTMESH_SOURCE_DIR)/VERSION))
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 PKG_LICENSE:=GPL-2.0-only
 PKG_BUILD_DEPENDS:=luci-base/host
 
