@@ -31,19 +31,21 @@
  
  		const assoclist = E('table', { 'class': 'table assoclist', 'id': 'wifi_assoclist_table' }, [
  			E('tr', { 'class': 'tr table-titles' }, [
-@@ -390,12 +396,24 @@
+@@ -390,12 +396,26 @@
  			}
  		}
  
 +		for (const sta of peerStations) {
-+			rows.push([
-+				E('span', {}, [sta.ssid || sta.iface || '—']),
-+				E('span', {}, [sta.mac]),
-+				E('span', {}, [_('Mesh peer'), ' · ', sta.node]),
-+				mesh.signal(sta.signal),
-+				mesh.rate(sta),
-+				'—'
-+			]);
++			const row = [
++				mesh.stationNetwork(sta),
++				sta.mac.toUpperCase(),
++				mesh.stationHost(sta, hosthints),
++				mesh.stationSignal(sta.signal),
++				mesh.stationRates(sta)
++			];
++			if (assoclist.firstElementChild.children.length > row.length)
++				row.push('');
++			rows.push(row);
 +		}
 +
  		cbi_update_table(assoclist, rows, E('em', _('No information available')));

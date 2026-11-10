@@ -25,7 +25,12 @@ function write(name, value) {
 		fs.rename(file + '.new', file);
 }
 
-function stations() {
+function neighbours(family) {
+	let r = rtnl.const;
+	return mesh.array(rtnl.request(r.RTM_GETNEIGH, r.NLM_F_DUMP, { family }));
+}
+
+function stations(neighbours4) {
 	let found = {}, truncated = false;
 	// A patterned ubus list returns method signatures instead of object names.
 	let objects = filter(bus?.list() ?? [], obj => substr(obj, 0, 8) == 'hostapd.');
@@ -52,16 +57,25 @@ function stations() {
 				found[sta.mac] = sta;
 		}
 	}
+	if (length(found)) {
+		for (let row in neighbours4) {
+			let sta = found[mesh.mac(row.lladdr) ?? ''];
+			if (sta && !sta.ipv4 && !(row.state & (0x01 | 0x20)))
+				sta.ipv4 = mesh.station_ip(row.dst, 4);
+		}
+		for (let row in neighbours(rtnl.const.AF_INET6)) {
+			let sta = found[mesh.mac(row.lladdr) ?? ''];
+			if (sta && !(row.state & (0x01 | 0x20))) {
+				let address = mesh.station_ip(row.dst, 16);
+				if (address && (!sta.ipv6 || match(sta.ipv6, /^fe[89ab]/)))
+					sta.ipv6 = address;
+			}
+		}
+	}
 	return { stations: values(found), truncated };
 }
 
-function neighbours(family) {
-	let r = rtnl.const;
-	return mesh.array(rtnl.request(r.RTM_GETNEIGH, r.NLM_F_DUMP, { family }));
-}
-
-function topology(lan, peers) {
-	let neighbours4 = neighbours(rtnl.const.AF_INET);
+function topology(lan, peers, neighbours4) {
 	let fdb = neighbours(rtnl.const.AF_BRIDGE);
 	let wireless = {};
 	for (let radio in values(mesh.call(bus, 'network.wireless', 'status'))) {
@@ -134,7 +148,8 @@ let lan = mesh.lan_status(bus);
 let node = mesh.identity(bus);
 let now = mesh.uptime();
 let peers = slice(filter(mesh.peer_inventory(config, overrides).peers, p => p.bridge_mac != node.bridge_mac), 0, mesh.limit);
-let local = { version: 1, ...node, ...stations(), ...topology(lan, peers),
+let neighbours4 = neighbours(rtnl.const.AF_INET);
+let local = { version: 1, ...node, ...stations(neighbours4), ...topology(lan, peers, neighbours4),
 	revision: trim(fs.readfile('/proc/sys/kernel/random/uuid', 40) ?? '') };
 write('local', { seen: now, data: local });
 

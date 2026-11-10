@@ -71,7 +71,7 @@ export function error() {{ return null; }}
 """)
         (stage / 'fixture-rtnl.uc').write_text(f"""
 import {{ readfile }} from 'fs';
-export const constants = {{ RTM_GETNEIGH: 30, NLM_F_DUMP: 768, AF_INET: 2, AF_BRIDGE: 7 }};
+export const constants = {{ RTM_GETNEIGH: 30, NLM_F_DUMP: 768, AF_INET: 2, AF_INET6: 10, AF_BRIDGE: 7 }};
 export function request(cmd, flags, args) {{
 	return json(readfile('{stage}/netlink.json'))[sprintf('%d', args.family)];
 }}
@@ -86,7 +86,8 @@ export function request(cmd, flags, args) {{
             'devices': {'br-lan': {'type': 'bridge', 'macaddr': local_mac, 'bridge-members': ['lan1', 'lan2']}},
             'hostapd.ap-mld0:get_status': {'status': 'ENABLED', 'ssid': 'Home'},
             'hostapd.ap-mld0:get_clients': {'clients': {
-                station_mac: {'assoc': True, 'authorized': True, 'signal': -60, 'rate': {'tx': 120000}},
+                station_mac: {'assoc': True, 'authorized': True, 'signal': -60,
+                              'rate': {'rx': 17200000, 'tx': 144120000}},
                 '02:00:00:00:00:71': {'assoc': False, 'authorized': False},
             }},
             'umdns:browse': {'_xr-roaming._tcp': {
@@ -97,7 +98,11 @@ export function request(cmd, flags, args) {{
         (stage / 'bus.json').write_text(json.dumps(bus))
         (stage / 'netlink.json').write_text(json.dumps({
             '2': [{'dst': '192.168.1.21', 'dev': 'br-lan.1', 'state': 2, 'lladdr': legacy_mac},
-                  {'dst': '192.168.1.1', 'dev': 'br-lan.1', 'state': 2, 'lladdr': '02:00:00:00:00:ff'}],
+                  {'dst': '192.168.1.1', 'dev': 'br-lan.1', 'state': 2, 'lladdr': '02:00:00:00:00:ff'},
+                  {'dst': '192.168.1.40', 'dev': 'br-lan.1', 'state': 0x20, 'lladdr': station_mac},
+                  {'dst': '192.168.1.41', 'dev': 'br-lan.1', 'state': 2, 'lladdr': station_mac}],
+            '10': [{'dst': 'fe80::70', 'dev': 'br-lan.1', 'state': 2, 'lladdr': station_mac},
+                   {'dst': 'fd00::70', 'dev': 'br-lan.1', 'state': 2, 'lladdr': station_mac}],
             '7': [{'lladdr': legacy_mac, 'dev': 'lan2', 'master': 'br-lan', 'vlan': 1, 'state': 2},
                   {'lladdr': legacy_mac, 'dev': 'lan1', 'master': 'br-lan', 'vlan': 9, 'state': 2},
                   {'lladdr': '02:00:00:00:00:ff', 'dev': 'lan1', 'master': 'br-lan', 'vlan': 1, 'state': 2}],
@@ -126,14 +131,20 @@ export function request(cmd, flags, args) {{
 
         remote = {'version': 1, 'revision': '11111111-1111-4111-8111-111111111111',
                   'bridge_mac': legacy_mac, 'name': 'Second AP', 'paths': {},
-                  'stations': [{'mac': '02:00:00:00:00:72', 'ssid': 'Home', 'signal': -51}]}
+                  'stations': [{'mac': '02:00:00:00:00:72', 'ssid': 'Home', 'signal': -51,
+                                'ipv4': '192.168.1.42', 'ipv6': 'ff02::1', 'rx': 96070000}]}
         (stage / 'remote.json').write_text(json.dumps(remote))
         run([str(stage / 'mesh-sample.uc')])
         data = rpc('status')
         assert data['local']['stations'][0]['mac'] == station_mac and len(data['local']['stations']) == 1
+        station = data['local']['stations'][0]
+        assert (station['ipv4'], station['ipv6']) == ('192.168.1.41', 'fd00::70')
+        assert (station['rx'], station['tx']) == (17200000, 144120000)
         assert data['local']['paths'][legacy_mac] == {'bridge': 'br-lan', 'port': 'lan2', 'medium': 'ethernet'}
         assert data['local']['gateway']['port'] == 'lan1'
-        assert data['peers'][0]['online'] and data['peers'][0]['data']['stations'][0]['signal'] == -51
+        station = data['peers'][0]['data']['stations'][0]
+        assert data['peers'][0]['online'] and station['signal'] == -51
+        assert (station['ipv4'], station['ipv6'], station['rx']) == ('192.168.1.42', None, 96070000)
         assert rpc('discover')['candidates'] == [{'address': '192.168.1.22', 'name': 'candidate'}]
         assert cgi('192.168.1.21')[0] == 200 and cgi('192.168.1.22')[0] == 403
         assert cgi('192.168.1.22', query='identity=1')[1]['bridge_mac'] == local_mac

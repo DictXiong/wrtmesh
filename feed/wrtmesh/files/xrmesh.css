@@ -1,0 +1,148 @@
+.wrtmesh-header,
+.wrtmesh-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: .5rem;
+}
+
+.wrtmesh-header {
+	justify-content: space-between;
+}
+
+.wrtmesh-header h2 {
+	margin: 0;
+}
+
+.wrtmesh-section {
+	margin-block: 1rem;
+}
+
+.wrtmesh-table,
+.wrtmesh-diagram {
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+.wrtmesh-peer-status {
+	display: inline-flex;
+	align-items: center;
+	gap: .4em;
+}
+
+.wrtmesh-peer-status::before {
+	content: "";
+	width: .5em;
+	height: .5em;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: .45;
+}
+
+.wrtmesh-peer-status.wrtmesh-online::before {
+	background: #15803d;
+	opacity: 1;
+}
+
+.wrtmesh-topology {
+	--wrtmesh-accent: #2563eb;
+	margin-block: .6rem 1rem;
+}
+
+.wrtmesh-map {
+	display: block;
+	height: auto;
+	max-width: 100%;
+}
+
+.wrtmesh-line {
+	stroke: currentColor;
+	stroke-opacity: .55;
+	stroke-linecap: round;
+}
+
+.wrtmesh-line-shared {
+	stroke: var(--wrtmesh-accent);
+	stroke-width: 2;
+	stroke-opacity: 1;
+}
+
+.wrtmesh-node {
+	fill: var(--color-bg-elevated, Canvas);
+	stroke: currentColor;
+	stroke-opacity: .35;
+}
+
+.wrtmesh-node-local {
+	stroke: var(--wrtmesh-accent);
+	stroke-opacity: 1;
+}
+
+.wrtmesh-node-label,
+.wrtmesh-node-subtitle {
+	fill: currentColor;
+}
+
+.wrtmesh-node-label {
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.wrtmesh-node-subtitle {
+	font-size: 12px;
+	opacity: .75;
+}
+
+.wrtmesh-count {
+	fill: var(--wrtmesh-accent);
+}
+
+.wrtmesh-count-unknown {
+	fill: #64748b;
+}
+
+.wrtmesh-legend {
+	display: flex;
+	align-items: center;
+	gap: .45rem;
+	font-size: .9em;
+}
+
+.wrtmesh-swatch {
+	width: 1.5em;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--wrtmesh-accent);
+}
+
+.wrtmesh-paths {
+	border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+	padding-top: .5rem;
+}
+
+.wrtmesh-paths summary {
+	cursor: pointer;
+}
+
+.wrtmesh-paths li {
+	margin-block: .3rem;
+}
+
+.wrtmesh-network img {
+	width: 24px;
+	height: 24px;
+}
+
+.wrtmesh-secondary,
+.wrtmesh-rates > span {
+	display: block;
+}
+
+.wrtmesh-secondary {
+	opacity: .78;
+}
+
+.wrtmesh-rates {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}

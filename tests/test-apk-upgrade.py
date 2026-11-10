@@ -83,6 +83,8 @@ def test(apk, apk_builder, new, old):
             assert (root / 'etc/config/xr_roaming').read_bytes() == ROAMING
             assert (root / 'etc/config/xr_mesh').read_bytes() == MESH
             assert (root / 'etc/init.d/xr_roaming').is_file()
+            assert (root / 'www/luci-static/resources/xrmesh.css').stat().st_size > 0
+            assert (root / 'usr/lib/lua/luci/i18n/wrtmesh.zh-cn.lmo').stat().st_size > 0
             assert (root / 'www/xr-roaming').readlink() == Path('/tmp/xr-roaming-public')
             hashes = root / 'lib/apk/packages/wrtmesh.conffiles_static'
             assert {line.split()[0] for line in hashes.read_text().splitlines()} == {

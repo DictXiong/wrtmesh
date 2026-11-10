@@ -3,6 +3,7 @@
 'require rpc';
 
 const getStatus = rpc.declare({ object: 'xrmesh', method: 'status' });
+const openPaths = new Set();
 let cachedStatus, refreshAt = 0;
 
 function nodeName(peer) {
@@ -95,13 +96,13 @@ function diagram(local, peers, gateways, links, bus) {
 	const height = Math.max(...nodes.map(node => node.y)) + 32;
 	const picture = svgElement('svg', {
 		viewBox: [left, 0, width, height].join(' '), width, height,
-		role: 'img', 'aria-label': _('Mesh topology'),
-		style: 'display:block;max-width:100%;min-width:' + Math.min(440, width) + 'px;height:auto'
+		class: 'wrtmesh-map', role: 'img', 'aria-label': _('Mesh topology'),
+		style: 'min-width:' + Math.min(400, width) + 'px'
 	});
 	function line(x1, y1, x2, y2, title, known, shared) {
 		const segment = svgElement('line', {
-			x1, y1, x2, y2, stroke: shared ? '#2563eb' : 'currentColor',
-			'stroke-width': shared ? 2 : 1, 'stroke-dasharray': known ? 'none' : '5 5'
+			x1, y1, x2, y2, class: shared ? 'wrtmesh-line wrtmesh-line-shared' : 'wrtmesh-line',
+			'stroke-dasharray': known ? 'none' : '5 5'
 		});
 		segment.appendChild(svgElement('title', {}, title));
 		picture.appendChild(segment);
@@ -131,23 +132,23 @@ function diagram(local, peers, gateways, links, bus) {
 		group.appendChild(svgElement('title', {}, title));
 		group.appendChild(svgElement('rect', {
 			x: node.x - 98, y: node.y - 22, width: 196, height: 44, rx: 8,
-			fill: 'Canvas', stroke: 'currentColor'
+			class: node.id === local.bridge_mac ? 'wrtmesh-node wrtmesh-node-local' : 'wrtmesh-node'
 		}));
 		const textX = node.x - (node.badge ? 20 : 0);
 		const limit = node.badge ? 18 : 23;
 		group.appendChild(svgElement('text', {
 			x: textX, y: node.y - (node.subtitle ? 8 : 0), 'text-anchor': 'middle',
-			'dominant-baseline': 'central', fill: 'currentColor', 'font-size': 14
+			'dominant-baseline': 'central', class: 'wrtmesh-node-label'
 		}, node.label.length > limit ? node.label.slice(0, limit - 1) + '…' : node.label));
 		if (node.subtitle)
 			group.appendChild(svgElement('text', {
 				x: textX, y: node.y + 9, 'text-anchor': 'middle', 'dominant-baseline': 'central',
-				fill: 'currentColor', 'font-size': 12
+				class: 'wrtmesh-node-subtitle'
 			}, node.subtitle));
 		if (node.badge) {
 			group.appendChild(svgElement('rect', {
 				x: node.x + 50, y: node.y - 12, width: 38, height: 24, rx: 12,
-				fill: node.badge.unknown ? '#64748b' : '#2563eb'
+				class: node.badge.unknown ? 'wrtmesh-count wrtmesh-count-unknown' : 'wrtmesh-count'
 			}));
 			group.appendChild(svgElement('text', {
 				x: node.x + 69, y: node.y, 'text-anchor': 'middle', 'dominant-baseline': 'central',
@@ -158,11 +159,31 @@ function diagram(local, peers, gateways, links, bus) {
 	}
 	picture.appendChild(svgElement('desc', {}, nodes.map(node =>
 		[node.label, node.subtitle, node.badge?.title].filter(Boolean).join(' · ')).join('. ')));
-	return E('div', { style: 'max-width:100%;overflow-x:auto' }, picture);
+	return E('div', { class: 'wrtmesh-diagram' }, picture);
+}
+
+function rate(value) {
+	// C7 hostapd multiplies the driver's kbit/s rate by 100 in its ubus reply.
+	return value == null ? '—' : '%.1f\xa0%s'.format(value / 100000, _('Mbit/s'));
+}
+
+function pathDetails(key, title, content) {
+	return E('details', {
+		class: key === 'local' ? 'wrtmesh-paths' : null,
+		open: openPaths.has(key) ? '' : null,
+		toggle: event => {
+			if (event.currentTarget.open)
+				openPaths.add(key);
+			else
+				openPaths.delete(key);
+		}
+	}, [E('summary', {}, [title]), ...content]);
 }
 
 return baseclass.extend({
 	status(force) {
+		if (!document.getElementById('wrtmesh-styles'))
+			document.head.appendChild(E('link', { id: 'wrtmesh-styles', rel: 'stylesheet', href: L.resource('xrmesh.css') }));
 		const now = Date.now();
 		if (force || now >= refreshAt) {
 			refreshAt = now + 12000;
@@ -210,13 +231,17 @@ return baseclass.extend({
 				detail: pathText(gateway) });
 		}
 		const bus = sharedEthernet(local.bridge_mac, links);
-		return E('div', {}, [
+		return E('div', { class: 'wrtmesh-topology' }, [
 			diagram(local, peers, Array.from(gateways.values()), links, bus),
-			bus ? E('p', {}, _('The blue line groups nodes on the same Ethernet segment.')) : null,
-			links.length ? E('p', {}, _('Paths reflect local bridge and port observations. A switch may be between devices.')) : null,
-			E('ul', {}, links.map(link => E('li', {}, [link.label, ' · ', link.detail]))),
-			peerPaths.length ? E('details', {}, [
-				E('summary', {}, _('Paths reported between peers')), E('ul', {}, peerPaths)
+			bus ? E('p', { class: 'wrtmesh-legend' }, [
+				E('span', { class: 'wrtmesh-swatch', 'aria-hidden': 'true' }), _('Shared Ethernet')
+			]) : null,
+			links.length ? pathDetails('local', _('Bridge and port details'), [
+				E('p', { class: 'cbi-section-descr' }, _('Paths reflect local bridge and port observations. A switch may be between devices.')),
+				E('ul', {}, links.map(link => E('li', {}, [
+					E('span', {}, [link.label]), E('small', { class: 'wrtmesh-secondary' }, [link.detail])
+				]))),
+				peerPaths.length ? pathDetails('peer', _('Paths reported between peers'), [E('ul', {}, peerPaths)]) : null
 			]) : null
 		]);
 	},
@@ -232,12 +257,47 @@ return baseclass.extend({
 		return rows;
 	},
 
-	signal(value) {
-		return value == null ? '—' : '%d %s'.format(value, _('dBm'));
+	stationNetwork(station) {
+		return E('span', { class: 'ifacebadge wrtmesh-network', title: station.node }, [
+			E('img', { src: L.resource('icons/wifi.svg'), alt: '' }),
+			E('span', {}, [
+				station.ssid || station.iface || '—',
+				station.remote ? E('small', { class: 'wrtmesh-secondary' }, [
+					_('Mesh peer'), ' · ', station.node
+				]) : null
+			])
+		]);
 	},
 
-	rate(station) {
-		const format = rate => rate == null ? '—' : '%.1f'.format(rate / 1000);
-		return format(station.rx) + ' / ' + format(station.tx) + ' ' + _('Mbit/s');
+	stationHost(station, hints) {
+		const mac = station.mac.toUpperCase();
+		const name = hints?.getHostnameByMACAddr(mac);
+		const ipv4 = station.ipv4 || hints?.getIPAddrByMACAddr(mac);
+		const ipv6 = station.ipv6 || hints?.getIP6AddrByMACAddr(mac);
+		const addresses = [ipv4, ipv6].filter(Boolean);
+		return E('span', { class: 'wrtmesh-host' }, [
+			name ? E('span', {}, [name]) : null,
+			...(addresses.length ? addresses : [mac]).map(address =>
+				E('small', { class: 'wrtmesh-secondary' }, [address]))
+		]);
+	},
+
+	stationSignal(value) {
+		if (value == null)
+			return E('span', {}, ['—']);
+		const quality = Math.max(0, Math.min(100, (value + 110) / 70 * 100));
+		const icon = quality === 0 ? '000-000' : quality < 25 ? '000-025' :
+			quality < 50 ? '025-050' : quality < 75 ? '050-075' : '075-100';
+		return E('span', { class: 'ifacebadge wrtmesh-signal', 'data-signal': value }, [
+			E('img', { src: L.resource('icons/signal-' + icon + '.svg'), alt: '' }),
+			E('span', {}, ['%d\xa0%s'.format(value, _('dBm'))])
+		]);
+	},
+
+	stationRates(station) {
+		return E('span', { class: 'wrtmesh-rates' }, [
+			E('span', { title: _('RX Rate') }, [rate(station.rx)]),
+			E('span', { title: _('TX Rate') }, [rate(station.tx)])
+		]);
 	}
 });

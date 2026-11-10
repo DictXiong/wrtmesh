@@ -46,10 +46,16 @@ function table(headers, rows, empty) {
 		E('tr', { class: 'tr table-titles' }, headers.map(title => E('th', { class: 'th' }, title)))
 	]);
 	cbi_update_table(table, rows, E('em', {}, empty));
-	return table;
+	return E('div', { class: 'wrtmesh-table' }, table);
 }
 
 const cell = text => E('span', {}, [String(text ?? '—')]);
+
+function section(title, content) {
+	return E('section', { class: 'cbi-section wrtmesh-section' }, [
+		E('h3', {}, [title]), ...content
+	]);
+}
 
 return view.extend({
 	handleSaveApply: null,
@@ -147,10 +153,12 @@ return view.extend({
 
 	sections(data) {
 		const peers = (data?.peers || []).map(p => {
-			const row = [cell(xrmesh.nodeName(p)), cell(p.address), cell(p.bridge_mac),
-				cell(p.online ? _('Online') : _('No fresh snapshot')), cell(Object.keys(p.profiles).join(', ') || '—')];
+			const status = p.online ? _('Online') : _('No fresh snapshot');
+			const row = [cell(p.name || p.data?.name), cell(p.address), cell(p.bridge_mac.toUpperCase()),
+				E('span', { class: p.online ? 'wrtmesh-peer-status wrtmesh-online' : 'wrtmesh-peer-status' }, [status]),
+				cell(Object.keys(p.profiles).join(', ') || '—')];
 			if (this.writable)
-				row.push(E('div', {}, [
+				row.push(E('div', { class: 'wrtmesh-actions' }, [
 					E('button', { class: 'btn', click: () => this.editor(p, false) }, _('Edit')), ' ',
 					E('button', { class: 'btn cbi-button-negative', click: () => this.confirmRemove(p) }, _('Remove'))
 				]));
@@ -160,18 +168,18 @@ return view.extend({
 		if (this.writable)
 			headers.push('');
 		const stationRows = xrmesh.stations(data, true).map(s => [
-			cell(s.mac), cell(s.node), cell(s.ssid || s.iface), cell(xrmesh.signal(s.signal)), cell(xrmesh.rate(s))
+			xrmesh.stationNetwork(s), cell(s.mac.toUpperCase()), xrmesh.stationHost(s),
+			xrmesh.stationSignal(s.signal), xrmesh.stationRates(s)
 		]);
 		const truncated = data?.local?.truncated || data?.peers?.some(peer => peer.data?.truncated);
 		return E('div', {}, [
-			E('h3', {}, _('Peers')),
-			table(headers, peers, _('No peers configured.')),
-			E('h3', {}, _('Mesh topology')),
-			xrmesh.topology(data),
-			E('h3', {}, _('Associated Stations')),
-			truncated ? E('p', {}, _('A node reached the 256-station reporting limit.')) : null,
-			table([_('MAC address'), _('Connected node'), _('Network'), _('Signal'), _('RX / TX Rate')],
-				stationRows, _('No associated stations reported.'))
+			section(_('Peers'), [table(headers, peers, _('No peers configured.'))]),
+			section(_('Mesh topology'), [xrmesh.topology(data)]),
+			section(_('Associated Stations'), [
+				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached the 256-station reporting limit.')) : null,
+				table([_('Network'), _('MAC address'), _('Host'), _('Signal'),
+					'%s / %s'.format(_('RX Rate'), _('TX Rate'))], stationRows, _('No associated stations reported.'))
+			])
 		]);
 	},
 
@@ -181,12 +189,14 @@ return view.extend({
 		this.content = E('div', {}, this.sections(data));
 		poll.add(() => this.refresh().catch(error => this.notify(error)), 15);
 		return E('div', { class: 'cbi-map' }, [
-			E('h2', {}, _('Mesh')),
-			E('p', {}, _('Add the peer on both devices to exchange station and topology snapshots. Peer changes apply to this device.')),
-			writable ? E('div', {}, [
-				E('button', { class: 'btn cbi-button-add', click: () => this.editor(null, false) }, _('Add peer')), ' ',
-				E('button', { class: 'btn cbi-button-action', click: this.action(() => this.search()) }, _('Discover peers'))
-			]) : null,
+			E('div', { class: 'wrtmesh-header' }, [
+				E('h2', {}, _('Mesh')),
+				writable ? E('div', { class: 'wrtmesh-actions' }, [
+					E('button', { class: 'btn cbi-button-action', click: this.action(() => this.search()) }, _('Discover peers')),
+					E('button', { class: 'btn cbi-button-add', click: () => this.editor(null, false) }, _('Add peer'))
+				]) : null
+			]),
+			E('p', { class: 'cbi-section-descr' }, _('Add the peer on both devices to exchange station and topology snapshots. Peer changes apply to this device.')),
 			this.content
 		]);
 	}

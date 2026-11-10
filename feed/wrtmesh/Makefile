@@ -7,6 +7,7 @@ PKG_NAME:=wrtmesh
 PKG_VERSION:=$(strip $(shell cat $(WRTMESH_SOURCE_DIR)/VERSION))
 PKG_RELEASE:=1
 PKG_LICENSE:=GPL-2.0-only
+PKG_BUILD_DEPENDS:=luci-base/host
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -39,6 +40,8 @@ define Build/Configure
 endef
 
 define Build/Compile
+	$(INSTALL_DIR) $(PKG_BUILD_DIR)
+	$(STAGING_DIR_HOSTPKG)/bin/po2lmo ./po/zh_Hans/wrtmesh.po $(PKG_BUILD_DIR)/wrtmesh.zh-cn.lmo
 endef
 
 define Package/wrtmesh/preinst
@@ -118,7 +121,10 @@ define Package/wrtmesh/install
 	$(INSTALL_DIR) $(1)/www/cgi-bin $(1)/www/luci-static/resources/view/network
 	$(INSTALL_BIN) ./files/xr-mesh.cgi $(1)/www/cgi-bin/xr-mesh
 	$(INSTALL_DATA) ./files/xrmesh.js $(1)/www/luci-static/resources/xrmesh.js
+	$(INSTALL_DATA) ./files/xrmesh.css $(1)/www/luci-static/resources/xrmesh.css
 	$(INSTALL_DATA) ./files/xrmesh-view.js $(1)/www/luci-static/resources/view/network/xrmesh.js
+	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/wrtmesh.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/
 	$(INSTALL_DIR) $(1)/www
 	$(LN) /tmp/xr-roaming-public $(1)/www/xr-roaming
 endef

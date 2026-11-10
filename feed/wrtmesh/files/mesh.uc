@@ -214,15 +214,25 @@ export function path(raw) {
 	};
 }
 
+export function station_ip(value, size) {
+	let bytes = iptoarr(value);
+	if (length(bytes) != size || !length(filter(bytes, n => n)) ||
+	    (size == 4 ? bytes[0] >= 224 : bytes[0] == 255))
+		return null;
+	return arrtoip(bytes);
+}
+
 export function station(raw) {
 	let addr = mac(raw?.mac);
 	if (!addr)
 		return null;
+	// Preserve the unsigned C7 hostapd get_clients values (100 times kbit/s).
 	let signal = raw.signal, rx = raw.rx, tx = raw.tx;
 	return { mac: addr, ssid: label(raw.ssid, 32), iface: dev(raw.iface),
+		ipv4: station_ip(raw.ipv4, 4), ipv6: station_ip(raw.ipv6, 16),
 		signal: type(signal) == 'int' && signal >= -127 && signal <= 0 ? signal : null,
-		rx: type(rx) == 'int' && rx > 0 && rx <= 100000000 ? rx : null,
-		tx: type(tx) == 'int' && tx > 0 && tx <= 100000000 ? tx : null };
+		rx: type(rx) == 'int' && rx > 0 && rx <= 0xffffffff ? rx : null,
+		tx: type(tx) == 'int' && tx > 0 && tx <= 0xffffffff ? tx : null };
 }
 
 export function snapshot(raw, addr) {
