@@ -1,7 +1,7 @@
 # wrtmesh
 
 wrtmesh provides OpenWrt multi-AP roaming assistance, station inventory and
-topology. It originated as `xr-roaming` in the XR1710G firmware.
+topology.
 
 ## Install or upgrade
 
@@ -13,17 +13,9 @@ firmware, trust the verified release key in `/etc/apk/keys` and install with:
 apk add ./wrtmesh-6.1.0-r1.apk
 ```
 
-To replace an installed `xr-roaming`, use a single transaction. The extra
-package argument replaces an old local APK checksum pin in `apk`'s world file:
-
-```sh
-apk add ./wrtmesh-6.1.0-r1.apk xr-roaming
-```
-
-The versioned `xr-roaming` provide makes APK replace the old owner. The
-existing `/etc/config/xr_roaming` and `/etc/config/xr_mesh` files stay in place,
-including across firmware sysupgrade with settings retained. Existing service
-commands and neighbor-report URLs are compatible.
+Package upgrades preserve local configuration in `/etc/config/xr_roaming` and
+`/etc/config/xr_mesh`. Firmware sysupgrade also preserves these files when
+settings are retained.
 
 For firmware or SDK builds, add this repository as an OpenWrt feed, install
 the `wrtmesh` feed entry and select `CONFIG_PACKAGE_wrtmesh=y` (image) or `=m`
