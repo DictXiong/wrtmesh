@@ -92,6 +92,17 @@ done
 exit 0
 endef
 
+define Package/wrtmesh/postinst
+#!/bin/sh
+[ -z "$${IPKG_INSTROOT}" ] || exit 0
+[ "$${IPKG_NO_SCRIPT}" = 1 ] && exit 0
+# Reload the ucode plugin and ACL on a running LuCI installation.
+if [ -x /etc/init.d/rpcd ]; then
+	/etc/init.d/rpcd reload >/dev/null 2>&1 || true
+fi
+exit 0
+endef
+
 define Package/wrtmesh/install
 	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/xr_roaming.config $(1)/etc/config/xr_roaming
