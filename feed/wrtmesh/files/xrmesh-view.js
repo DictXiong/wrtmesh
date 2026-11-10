@@ -63,7 +63,7 @@ return view.extend({
 	handleReset: null,
 
 	load() {
-		return Promise.all([xrmesh.status(), L.resolveDefault(access('ubus', 'xrmesh', 'save'), false)]);
+		return Promise.all([xrmesh.loadStatus(), L.resolveDefault(access('ubus', 'xrmesh', 'save'), false)]);
 	},
 
 	notify(error) {
@@ -75,7 +75,7 @@ return view.extend({
 	},
 
 	refresh(force) {
-		return xrmesh.status(force).then(data => {
+		return xrmesh.loadStatus(force).then(data => {
 			this.data = data;
 			this.content.replaceChildren(this.sections(data));
 		});
@@ -176,7 +176,7 @@ return view.extend({
 			section(_('Mesh peers'), [table(headers, peers, _('No peers configured.'))]),
 			section(_('Mesh topology'), [xrmesh.topology(data)]),
 			section(_('Associated Stations'), [
-				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached the 256-station reporting limit.')) : null,
+				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached its station reporting limit.')) : null,
 				table([_('Network'), _('MAC address'), _('Host'), _('Signal'),
 					'%s / %s'.format(_('RX Rate'), _('TX Rate'))], stationRows, _('No associated stations reported.'))
 			])
@@ -189,6 +189,7 @@ return view.extend({
 		this.content = E('div', {}, this.sections(data));
 		poll.add(() => this.refresh().catch(error => this.notify(error)), 15);
 		return E('div', { class: 'cbi-map' }, [
+			xrmesh.stylesheet(),
 			E('div', { class: 'wrtmesh-header' }, [
 				E('h2', {}, _('Mesh')),
 				writable ? E('div', { class: 'wrtmesh-actions' }, [

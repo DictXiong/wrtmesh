@@ -7,6 +7,8 @@ import * as uci from 'uci';
 export const state = '/tmp/xr-roaming-private/mesh';
 export const ttl = 95;
 export const limit = 15;
+export const response_limit = 65536;
+export const cache_limit = 1048576;
 export const service = '_xr-roaming._tcp';
 
 export function mac(s) {
@@ -181,29 +183,43 @@ export function advertised_profiles(cursor, addr) {
 	return result;
 }
 
-export function fetch(lan, address, identity_only) {
+export function fetch_response(lan, address, identity_only) {
 	if (!on_lan(lan, address))
-		return null;
+		return { status: 'unreachable' };
 	let directory = fs.mkdtemp('/tmp/xr-mesh-fetch.XXXXXX');
 	if (!directory)
-		return null;
+		return { status: 'unavailable' };
 	let file = directory + '/reply';
-	let max = identity_only ? 4096 : 65536;
+	let headers = directory + '/headers';
+	let max = identity_only ? 4096 : response_limit;
 	let path = '/cgi-bin/xr-mesh' + (identity_only ? '?identity=1' : '');
-	let result;
+	let result = { status: 'unreachable' };
 	try {
 		let rc = system(['/usr/bin/curl', '--disable', '--silent', '--fail', '--noproxy', '*',
 			'--proto', '=http', '--interface', lan.address, '--connect-timeout', '1',
-			'--max-time', '2', '--max-filesize', sprintf('%d', max), '--output', file,
+			'--max-time', '2', '--max-filesize', sprintf('%d', max),
+			'--dump-header', headers, '--output', file,
 			'http://' + address + path], 2500);
-		if (!rc)
-			result = read_json(file, max);
+		let code = int(match(fs.readfile(headers, 128) ?? '', /^HTTP\/[0-9.]+ ([0-9]{3})[[:space:]]/)?.[1]);
+		if (!rc && code == 200)
+			result = { status: 'ok', data: read_json(file, max) };
+		else if (code == 401 || code == 403)
+			result.status = 'forbidden';
+		else if (code == 503)
+			result.status = 'stale';
+		else if (code)
+			result.status = 'unavailable';
 	} catch (e) {
-		result = null;
+		result.status = 'unavailable';
 	}
 	fs.unlink(file);
+	fs.unlink(headers);
 	fs.rmdir(directory);
 	return result;
+}
+
+export function fetch(lan, address, identity_only) {
+	return fetch_response(lan, address, identity_only).data;
 }
 
 export function path(raw) {
@@ -222,23 +238,103 @@ export function station_ip(value, size) {
 	return arrtoip(bytes);
 }
 
+function valid_int(value, min, max) {
+	return type(value) == 'int' && value >= min && value <= max ? value : null;
+}
+
+export function link_id(value) {
+	return valid_int(value, 0, 15);
+}
+
+export function station_link(raw) {
+	let id = link_id(raw?.id), addr = mac(raw?.mac), bssid = mac(raw?.bssid);
+	if (id == null || !addr || !bssid)
+		return null;
+	let link = { id, mac: addr, bssid };
+	for (let key, value in {
+		freq: valid_int(raw.freq, 2000, 7125), channel: valid_int(raw.channel, 1, 233),
+		signal: valid_int(raw.signal, -127, 0),
+		rx: valid_int(raw.rx, 1, 0xffffffff), tx: valid_int(raw.tx, 1, 0xffffffff)
+	})
+		if (value != null)
+			link[key] = value;
+	return link;
+}
+
 export function station(raw) {
 	let addr = mac(raw?.mac);
 	if (!addr)
 		return null;
 	// Preserve the unsigned C7 hostapd get_clients values (100 times kbit/s).
-	let signal = raw.signal, rx = raw.rx, tx = raw.tx;
-	return { mac: addr, ssid: label(raw.ssid, 32), iface: dev(raw.iface),
+	let sta = { mac: addr, ssid: label(raw.ssid, 32), iface: dev(raw.iface),
 		ipv4: station_ip(raw.ipv4, 4), ipv6: station_ip(raw.ipv6, 16),
-		signal: type(signal) == 'int' && signal >= -127 && signal <= 0 ? signal : null,
-		rx: type(rx) == 'int' && rx > 0 && rx <= 0xffffffff ? rx : null,
-		tx: type(tx) == 'int' && tx > 0 && tx <= 0xffffffff ? tx : null };
+		signal: valid_int(raw.signal, -127, 0), rx: valid_int(raw.rx, 1, 0xffffffff),
+		tx: valid_int(raw.tx, 1, 0xffffffff) };
+	for (let key, value in {
+		name: label(raw.name, 64), bssid: mac(raw.bssid), freq: valid_int(raw.freq, 2000, 7125),
+		channel: valid_int(raw.channel, 1, 233), mld: mac(raw.mld) == addr ? addr : null,
+		ap_mld: mac(raw.ap_mld)
+	})
+		if (value)
+			sta[key] = value;
+	if (sta.mld) {
+		let links = {};
+		for (let item in slice(array(raw.links), 0, 16)) {
+			let link = station_link(item);
+			if (link)
+				links[link.id] ??= link;
+		}
+		if (length(links))
+			sta.links = values(links);
+		let assoc = link_id(raw.assoc_link_id);
+		if (assoc != null && links[assoc])
+			sta.assoc_link_id = assoc;
+	}
+	return sta;
+}
+
+export function station_key(sta) {
+	return sta.mld ? sta.mld + '/' + (sta.ap_mld ?? sta.iface ?? '') + '/' + (sta.ssid ?? '') : sta.mac;
+}
+
+export function merge_station(existing, candidate) {
+	if (!existing)
+		return candidate;
+	let prefer_new = candidate.signal != null && (existing.signal == null || candidate.signal > existing.signal);
+	let best = prefer_new ? candidate : existing;
+	let other = prefer_new ? existing : candidate;
+	if (!best.mld || !length(other.links))
+		return best;
+	let links = {};
+	for (let link in other.links)
+		links[link.id] = link;
+	for (let link in best.links ?? []) {
+		let previous = links[link.id];
+		links[link.id] = previous?.mac == link.mac && previous?.bssid == link.bssid ?
+			{ ...previous, ...link } : link;
+	}
+	return { ...best, links: values(links) };
+}
+
+// Keep the v1 HTTP body, local wrapper and 15-peer cache below their existing
+// limits even when every client includes a hostname and several links.
+export function bounded_snapshot(snapshot) {
+	let budget = response_limit - 4096 - length(sprintf('%J', { ...snapshot, stations: [] }));
+	let kept = [];
+	for (let sta in snapshot.stations) {
+		budget -= length(sprintf('%J', sta)) + 2;
+		if (budget < 0)
+			break;
+		push(kept, sta);
+	}
+	return { ...snapshot, stations: kept, truncated: snapshot.truncated || length(kept) < length(snapshot.stations) };
 }
 
 export function snapshot(raw, addr) {
 	if (raw?.version != 1 || raw.bridge_mac != addr ||
 	    type(raw.revision) != 'string' ||
 	    !match(raw.revision, /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/) ||
+	    (raw.sample_age != null && valid_int(raw.sample_age, 0, ttl - 1) == null) ||
 	    type(raw.stations) != 'array' || length(raw.stations) > 256 ||
 	    type(raw.paths) != 'object' || length(raw.paths) > limit)
 		return null;
@@ -247,21 +343,28 @@ export function snapshot(raw, addr) {
 		let s = station(item);
 		if (!s)
 			return null;
-		stations[s.mac] = s;
+		let key = station_key(s);
+		stations[key] = merge_station(stations[key], s);
 	}
 	for (let key, item in raw.paths) {
 		if (mac(key) == key)
 			paths[key] = path(item);
 	}
 	let gateway = raw.gateway;
-	return { version: 1, bridge_mac: addr, name: label(raw.name, 64) || '',
+	return bounded_snapshot({ version: 1, bridge_mac: addr, name: label(raw.name, 64) || '',
 		revision: raw.revision, stations: values(stations), truncated: raw.truncated === true,
+		sample_age: valid_int(raw.sample_age, 0, ttl - 1),
 		paths, gateway: ipv4(gateway?.address) ?
-			{ address: gateway.address, mac: mac(gateway.mac), ...path(gateway) } : null };
+			{ address: gateway.address, mac: mac(gateway.mac), ...path(gateway) } : null });
+}
+
+export function age(sample, now) {
+	return type(sample?.seen) == 'int' && now >= sample.seen ? now - sample.seen : null;
 }
 
 export function current(sample, now) {
-	return type(sample?.seen) == 'int' && now >= sample.seen && now - sample.seen < ttl;
+	let elapsed = age(sample, now);
+	return elapsed != null && elapsed < ttl;
 }
 
 export function cursor() {

@@ -10,18 +10,24 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.1.0-r1.apk
+apk add ./wrtmesh-6.2.0-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/xr_roaming` and
 `/etc/config/xr_mesh`. Firmware sysupgrade also preserves these files when
 settings are retained.
 
+The APK provides **Network → Mesh** and the **Mesh** section of **Status →
+Overview**. The latter uses LuCI's status include loader and belongs to the
+package. After installing or removing the APK, reload any already-open LuCI
+tabs. To remove an installation that replaced the legacy roaming package,
+run `apk del wrtmesh xr-roaming` to clear both possible APK world entries.
+Firmware that shipped the former Overview patch needs a firmware upgrade to
+remove that embedded integration.
+
 For firmware or SDK builds, add this repository as an OpenWrt feed, install
 the `wrtmesh` feed entry and select `CONFIG_PACKAGE_wrtmesh=y` (image) or `=m`
-(APK). The `integration/luci-overview.patch` targets the XR1710G LuCI feed.
-The Network → Mesh page ships in the APK. Firmware builders apply that patch
-to add the map and peer stations to the built-in Overview.
+(APK). The package depends on `luci-mod-status` for the Overview loader.
 
 The roaming worker uses shell and jq. `hostapd-utils` supplies the standard
 `/usr/sbin/hostapd_cli`; no private binary or historical binary hash is carried
@@ -49,13 +55,23 @@ The observer samples associated, authorized Wi-Fi stations via hostapd and
 uses netifd, ARP and bridge forwarding tables for topology. When possible, the
 map labels the bridge, local port and peer-side port. Forwarding data can point
 through a switch, and entries age out. The map shows unknown ports when the
-available evidence is incomplete. PPP dial-up next hops are omitted. The
-patched Full firmware also shows the map and peer stations in **Status →
-Overview**.
+available evidence is incomplete. PPP dial-up next hops are omitted.
 
-The observer runs on a 30-second schedule and drops snapshots after 95 seconds
-without a new revision. It caps the local inventory at 15 peers and each node
-snapshot at 256 stations. Discovery advertises only the service. The HTTP
+The **Mesh** section in Overview shows the topology and a separate remote
+wireless client table grouped by access node. Client details include reported
+addresses and link identifiers when available. RX and TX are negotiated link
+rates from the AP's perspective. A report with an explicit MLD identity can
+contain several links. During roaming, overlapping fresh records are shown
+once using the freshest observation when a reliable identity matches. Links
+from different APs are never combined. The native wireless table continues
+to show stations associated with the local AP.
+
+The observer runs on a 30-second schedule. After 95 seconds without a new
+revision, the last snapshot stops contributing station and topology data.
+Overview shows when each node was last observed and distinguishes fresh
+empty snapshots from stale data, unreachable nodes, and denied requests.
+It caps the local inventory at 15 peers and each node snapshot at 256
+stations. Discovery advertises only the service. The HTTP
 identity response includes the bridge MAC, node name and available roaming
 BSSIDs. Station and topology responses require a registered source IPv4
 address on the management LAN. The HTTP exchange uses plaintext and offers no
@@ -196,6 +212,16 @@ After building and extracting an APK to a separate directory, add
 RAM symlink match the source. These local checks do not substitute for guarded
 live installation and actual hostapd/procd acceptance on the AP.
 
+With Playwright and Chromium installed, run the Overview include loader and
+both views in a browser using fixture RPC responses:
+
+```sh
+node tests/test-luci-browser.cjs PATH_TO_UNPATCHED_LUCI_FEED
+```
+
+Pass an unpacked APK root as a second argument to exercise its installed
+copies of the modules. Set `WRTMESH_PLAYWRIGHT` or `WRTMESH_CHROMIUM` to
+use a non-default module or browser executable.
 
 Build a standalone signed APK with the checksum-pinned SDK:
 

@@ -32,8 +32,9 @@ let peers = mesh.peer_inventory(config, mesh.overrides(config)).peers;
 if (!length(filter(peers, p => p.address == remote && p.bridge_mac != node.bridge_mac)))
 	reply('403 Forbidden', {});
 
-let local = mesh.read_json(mesh.state + '/local.json', 65536);
-if (!mesh.current(local, mesh.uptime()) || local.data?.bridge_mac != node.bridge_mac)
+let local = mesh.read_json(mesh.state + '/local.json', mesh.response_limit);
+let age = mesh.age(local, mesh.uptime());
+if (age == null || age >= mesh.ttl || local.data?.bridge_mac != node.bridge_mac)
 	reply('503 Service Unavailable', {});
 
-reply('200 OK', local.data);
+reply('200 OK', { ...local.data, sample_age: age });

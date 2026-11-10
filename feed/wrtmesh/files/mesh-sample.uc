@@ -21,13 +21,90 @@ if (ARGV[0] == 'roaming') {
 
 function write(name, value) {
 	let file = mesh.state + '/' + name + '.json';
-	if (fs.writefile(file + '.new', value))
+	if (fs.writefile(file + '.new', sprintf('%J', value)))
 		fs.rename(file + '.new', file);
 }
 
 function neighbours(family) {
 	let r = rtnl.const;
 	return mesh.array(rtnl.request(r.RTM_GETNEIGH, r.NLM_F_DUMP, { family }));
+}
+
+function channel(freq) {
+	if (freq == 2484)
+		return 14;
+	if (freq == 5935)
+		return 2;
+	if (type(freq) != 'int')
+		return null;
+	let base = freq >= 2412 && freq <= 2472 ? 2407 :
+		freq >= 4910 && freq <= 4980 ? 4000 :
+		freq >= 5005 && freq <= 5895 ? 5000 :
+		freq >= 5955 && freq <= 7115 ? 5950 : null;
+	return base != null && (freq - base) % 5 == 0 ? int((freq - base) / 5) : null;
+}
+
+function client_station(key, client, iface, status, bss_links) {
+	let mld = mesh.mac(client.mld_addr), ap_mld = mesh.mac(client.ap_mld_address);
+	let assoc_id = mesh.link_id(client.assoc_link_id);
+	let links = [], assoc;
+	for (let item in slice(mesh.array(client.links), 0, 16)) {
+		let id = mesh.link_id(item.link_id), bss = id != null ? bss_links[id] : null;
+		let bssid = mesh.mac(item.bssid);
+		let freq = bssid && mesh.mac(bss?.bssid) == bssid ? bss.freq : null;
+		let link = mesh.station_link({ id, mac: item.address, bssid, freq, channel: channel(freq),
+			signal: id == assoc_id ? client.signal : null,
+			rx: id == assoc_id ? client.rate?.rx : null,
+			tx: id == assoc_id ? client.rate?.tx : null });
+		if (!link)
+			continue;
+		push(links, link);
+		if (id == assoc_id)
+			assoc = link;
+	}
+	// C7 get_clients keys an MLD by its MLD address. Its AP MLD identity and
+	// accepted association-link record distinguish this from an ordinary STA.
+	if (!mld && ap_mld && assoc)
+		mld = mesh.mac(key);
+	let single_bss = length(bss_links) <= 1;
+	let freq = assoc?.freq ?? (single_bss ? status.freq : null);
+	return mesh.station({ mac: mld ?? key, mld, ap_mld, ssid: status.ssid, iface,
+		bssid: assoc?.bssid ?? (single_bss ? status.bssid : null), freq,
+		channel: assoc?.channel ?? (single_bss ? status.channel : channel(freq)),
+		links, assoc_link_id: assoc_id, signal: client.signal, rx: client.rate?.rx, tx: client.rate?.tx });
+}
+
+function station_hints(stations, neighbours4) {
+	let aliases = {};
+	for (let sta in stations) {
+		for (let addr in [sta.mac, ...map(sta.links ?? [], link => link.mac)])
+			aliases[addr] = addr in aliases && aliases[addr] !== sta ? null : sta;
+	}
+	for (let row in neighbours4) {
+		let sta = aliases[mesh.mac(row.lladdr) ?? ''];
+		if (sta && !sta.ipv4 && !(row.state & (0x01 | 0x20)))
+			sta.ipv4 = mesh.station_ip(row.dst, 4);
+	}
+	for (let row in neighbours(rtnl.const.AF_INET6)) {
+		let sta = aliases[mesh.mac(row.lladdr) ?? ''];
+		if (sta && !(row.state & (0x01 | 0x20))) {
+			let address = mesh.station_ip(row.dst, 16);
+			if (address && (!sta.ipv6 || match(sta.ipv6, /^fe[89ab]/)))
+				sta.ipv6 = address;
+		}
+	}
+	let leases = fs.readfile('/tmp/dhcp.leases', 65536) ?? '';
+	let now = time();
+	for (let line in split(leases, '\n')) {
+		let fields = split(trim(line), /[ \t]+/);
+		let sta = aliases[mesh.mac(fields[1]) ?? ''];
+		if (!sta || length(fields) < 5 || !match(fields[0], /^[0-9]+$/) ||
+		    (int(fields[0]) != 0 && int(fields[0]) <= now))
+			continue;
+		sta.ipv4 ??= mesh.station_ip(fields[2], 4);
+		if (fields[3] != '*')
+			sta.name ??= mesh.label(fields[3], 64);
+	}
 }
 
 function stations(neighbours4) {
@@ -38,41 +115,31 @@ function stations(neighbours4) {
 		let status = mesh.call(bus, obj, 'get_status');
 		if (status.status != 'ENABLED' || !status.ssid)
 			continue;
+		let bss_links = {};
+		for (let link in slice(mesh.array(status.links), 0, 16)) {
+			let id = mesh.link_id(link.link_id);
+			if (id != null)
+				bss_links[id] = link;
+		}
 		let result = mesh.call(bus, obj, 'get_clients');
-		for (let mac, c in result.clients ?? {}) {
+		for (let key, c in result.clients ?? {}) {
 			if (!c?.assoc || !c.authorized)
 				continue;
-			let sta = mesh.station({
-				mac: c.mld_addr ?? mac, ssid: status.ssid, iface: substr(obj, 8),
-				signal: c.signal, rx: c.rate?.rx, tx: c.rate?.tx
-			});
+			let sta = client_station(key, c, substr(obj, 8), status, bss_links);
 			if (!sta)
 				continue;
-			if (!found[sta.mac] && length(found) >= 256) {
+			let id = mesh.station_key(sta);
+			if (!found[id] && length(found) >= 256) {
 				truncated = true;
 				continue;
 			}
-			if (!found[sta.mac] || (sta.signal != null &&
-			    (found[sta.mac].signal == null || sta.signal > found[sta.mac].signal)))
-				found[sta.mac] = sta;
+			found[id] = mesh.merge_station(found[id], sta);
 		}
 	}
-	if (length(found)) {
-		for (let row in neighbours4) {
-			let sta = found[mesh.mac(row.lladdr) ?? ''];
-			if (sta && !sta.ipv4 && !(row.state & (0x01 | 0x20)))
-				sta.ipv4 = mesh.station_ip(row.dst, 4);
-		}
-		for (let row in neighbours(rtnl.const.AF_INET6)) {
-			let sta = found[mesh.mac(row.lladdr) ?? ''];
-			if (sta && !(row.state & (0x01 | 0x20))) {
-				let address = mesh.station_ip(row.dst, 16);
-				if (address && (!sta.ipv6 || match(sta.ipv6, /^fe[89ab]/)))
-					sta.ipv6 = address;
-			}
-		}
-	}
-	return { stations: values(found), truncated };
+	let clients = values(found);
+	if (length(clients))
+		station_hints(clients, neighbours4);
+	return { stations: clients, truncated };
 }
 
 function topology(lan, peers, neighbours4) {
@@ -149,23 +216,29 @@ let node = mesh.identity(bus);
 let now = mesh.uptime();
 let peers = slice(filter(mesh.peer_inventory(config, overrides).peers, p => p.bridge_mac != node.bridge_mac), 0, mesh.limit);
 let neighbours4 = neighbours(rtnl.const.AF_INET);
-let local = { version: 1, ...node, ...stations(neighbours4), ...topology(lan, peers, neighbours4),
-	revision: trim(fs.readfile('/proc/sys/kernel/random/uuid', 40) ?? '') };
+let local = mesh.bounded_snapshot({ version: 1, ...node, ...stations(neighbours4), ...topology(lan, peers, neighbours4),
+	revision: trim(fs.readfile('/proc/sys/kernel/random/uuid', 40) ?? '') });
 write('local', { seen: now, data: local });
 
-let previous = mesh.read_json(mesh.state + '/peers.json', 1048576) ?? {};
+let previous = mesh.read_json(mesh.state + '/peers.json', mesh.cache_limit) ?? {};
 let cache = {};
 for (let p in peers) {
-	if (!mesh.on_lan(lan, p.address))
-		continue;
 	let addr = p.bridge_mac;
-	let old = previous[addr];
-	let reply = mesh.snapshot(mesh.fetch(lan, p.address, false), addr);
-	if (old?.address != p.address)
-		old = null;
-	if (reply && reply.revision != old?.data?.revision)
-		cache[addr] = { address: p.address, seen: mesh.uptime(), data: reply };
-	else if (mesh.current(old, mesh.uptime()))
-		cache[addr] = old;
+	let old = previous[addr]?.address == p.address ? previous[addr] : null;
+	let result = mesh.fetch_response(lan, p.address, false);
+	let reply = mesh.snapshot(result.data, addr);
+	let received = mesh.uptime();
+	let entry = { address: p.address, seen: old?.seen, revision: old?.revision ?? old?.data?.revision,
+		status: result.status == 'ok' ? 'unavailable' : result.status };
+	if (reply) {
+		if (reply.revision != entry.revision) {
+			entry.revision = reply.revision;
+			entry.seen = received - (reply.sample_age ?? 0);
+		}
+		entry.status = mesh.current(entry, received) ? 'fresh' : 'stale';
+		if (entry.status == 'fresh')
+			entry.data = reply;
+	}
+	cache[addr] = entry;
 }
 write('peers', cache);

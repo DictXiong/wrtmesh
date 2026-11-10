@@ -132,3 +132,100 @@
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
 }
+
+.wrtmesh-client-group {
+	border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+	margin-block: .75rem;
+	padding-block: .5rem;
+}
+
+.wrtmesh-client-group h5 {
+	margin-block: .25rem;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-client-state {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .25rem .8rem;
+}
+
+.wrtmesh-client-state[data-state="forbidden"] > span,
+.wrtmesh-client-state[data-state="unreachable"] > span,
+.wrtmesh-client-state[data-state="stale"] > span {
+	font-weight: 600;
+}
+
+.wrtmesh-client-table .td {
+	vertical-align: top;
+}
+
+.wrtmesh-client-details > summary {
+	cursor: pointer;
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-client-fields {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: .2rem .55rem;
+	margin-block: .45rem;
+}
+
+.wrtmesh-client-fields dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-client-link-detail {
+	margin-block: .6rem;
+}
+
+.wrtmesh-client-link-list > div {
+	display: flex;
+	align-items: center;
+	min-height: 2.8em;
+}
+
+.wrtmesh-client-mobile-label {
+	display: none;
+}
+
+@media (max-width: 42rem) {
+	.wrtmesh-client-table,
+	.wrtmesh-client-table > tbody,
+	.wrtmesh-client-table > tbody > .tr {
+		display: block;
+		width: 100%;
+	}
+
+	.wrtmesh-client-table > thead {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+	}
+
+	.wrtmesh-client-table > tbody > .tr {
+		margin-block: .6rem;
+		padding-block: .35rem;
+		border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+		border-radius: .4rem;
+	}
+
+	.wrtmesh-client-table > tbody > .tr > .td {
+		display: grid;
+		grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+		gap: .6rem;
+		width: 100%;
+		text-align: start;
+		overflow-wrap: anywhere;
+	}
+
+	.wrtmesh-client-mobile-label {
+		display: block;
+		font-weight: 600;
+	}
+}

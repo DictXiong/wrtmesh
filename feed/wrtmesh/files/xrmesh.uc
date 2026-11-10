@@ -14,20 +14,27 @@ function context() {
 
 function status() {
 	let ctx = context();
-	let now = mesh.uptime();
-	let local = mesh.read_json(mesh.state + '/local.json', 65536);
-	let cache = mesh.read_json(mesh.state + '/peers.json', 1048576) ?? {};
+	let now = mesh.uptime(), wall = time();
+	let local = mesh.read_json(mesh.state + '/local.json', mesh.response_limit);
+	let cache = mesh.read_json(mesh.state + '/peers.json', mesh.cache_limit) ?? {};
+	let local_age = local?.data?.bridge_mac == ctx.node.bridge_mac ? mesh.age(local, now) : null;
 	let peers = [];
 	for (let p in slice(ctx.peers, 0, mesh.limit)) {
 		if (p.bridge_mac == ctx.node.bridge_mac)
 			continue;
-		let entry = cache[p.bridge_mac];
-		let fresh = mesh.on_lan(ctx.lan, p.address) && entry?.address == p.address && mesh.current(entry, now);
-		push(peers, { ...p, online: !!fresh, data: fresh ? entry.data : null });
+		let entry = cache[p.bridge_mac]?.address == p.address ? cache[p.bridge_mac] : null;
+		let age = mesh.age(entry, now);
+		let status = mesh.on_lan(ctx.lan, p.address) ?
+			(entry?.status ?? (entry?.data ? 'fresh' : 'unknown')) : 'unreachable';
+		if (status == 'fresh' && (!entry.data || age == null || age >= mesh.ttl))
+			status = 'stale';
+		let online = status == 'fresh';
+		push(peers, { ...p, status, online, age, updated_at: age == null ? null : wall - age,
+			data: online ? entry.data : null });
 	}
 	return {
-		local: mesh.current(local, now) && local.data?.bridge_mac == ctx.node.bridge_mac ?
-			local.data : ctx.node,
+		local: local_age != null && local_age < mesh.ttl ? local.data : ctx.node,
+		local_age, local_updated_at: local_age == null ? null : wall - local_age,
 		address: ctx.lan?.address,
 		peers, profiles: keys(mesh.profiles(ctx.config))
 	};

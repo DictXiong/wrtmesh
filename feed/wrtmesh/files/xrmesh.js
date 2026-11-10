@@ -2,7 +2,7 @@
 'require baseclass';
 'require rpc';
 
-const getStatus = rpc.declare({ object: 'xrmesh', method: 'status' });
+const getStatus = rpc.declare({ object: 'xrmesh', method: 'status', raise: true });
 const openPaths = new Set();
 let cachedStatus, refreshAt = 0;
 
@@ -181,9 +181,7 @@ function pathDetails(key, title, content) {
 }
 
 return baseclass.extend({
-	status(force) {
-		if (!document.getElementById('wrtmesh-styles'))
-			document.head.appendChild(E('link', { id: 'wrtmesh-styles', rel: 'stylesheet', href: L.resource('xrmesh.css') }));
+	loadStatus(force) {
 		const now = Date.now();
 		if (force || now >= refreshAt) {
 			refreshAt = now + 12000;
@@ -192,6 +190,10 @@ return baseclass.extend({
 		return cachedStatus;
 	},
 	nodeName,
+
+	stylesheet() {
+		return E('link', { rel: 'stylesheet', href: L.resource('xrmesh.css') });
+	},
 
 	topology(data) {
 		const local = data?.local;
@@ -293,10 +295,10 @@ return baseclass.extend({
 		]);
 	},
 
-	stationRates(station) {
+	stationRates(station, apView) {
 		return E('span', { class: 'wrtmesh-rates' }, [
-			E('span', { title: _('RX Rate') }, [rate(station.rx)]),
-			E('span', { title: _('TX Rate') }, [rate(station.tx)])
+			E('span', { title: apView ? _('AP RX rate') : _('RX Rate') }, [rate(station.rx)]),
+			E('span', { title: apView ? _('AP TX rate') : _('TX Rate') }, [rate(station.tx)])
 		]);
 	}
 });

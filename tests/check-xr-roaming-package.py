@@ -24,6 +24,7 @@ def main():
                             for line in package_definition.splitlines()
                             if line.strip().startswith(("DEPENDS:=", "DEPENDS+=")))
     assert "+rpcd" in dependencies.split(), "select rpcd explicitly to avoid the LuCI dependency cycle"
+    assert "+luci-mod-status" in dependencies.split(), "the package requires the Overview include loader"
     preinst = makefile.split("define Package/wrtmesh/preinst\n", 1)[1].split("\nendef", 1)[0]
     preinst = preinst.replace("$$", "$")
     results = []
@@ -100,6 +101,27 @@ def main():
 
     check("offline-and-upgrade-hooks-locks-and-failure-recovery", hooks)
 
+    def rpcd_hooks():
+        with tempfile.TemporaryDirectory(prefix="wrtmesh-rpcd-") as tmp:
+            root = Path(tmp)
+            service = root / "rpcd"
+            calls = root / "calls"
+            service.write_text("#!/bin/sh\nprintf '%s\\n' \"$1\" >> " + shlex.quote(str(calls)) + "\n")
+            service.chmod(0o700)
+            for name in ("postinst", "postrm"):
+                script = makefile.split(f"define Package/wrtmesh/{name}\n", 1)[1].split("\nendef", 1)[0]
+                script = script.replace("$$", "$").replace("/etc/init.d/rpcd", str(service))
+                env = {key: value for key, value in os.environ.items()
+                       if key not in ("IPKG_INSTROOT", "IPKG_NO_SCRIPT")}
+                for variables in ({"IPKG_INSTROOT": str(root / "image")}, {"IPKG_NO_SCRIPT": "1"}):
+                    subprocess.run(["sh", "-s"], input=script, text=True, check=True, env=env | variables)
+                    assert not calls.exists()
+                subprocess.run(["sh", "-s"], input=script, text=True, check=True, env=env)
+                assert calls.read_text().splitlines() == ["reload"]
+                calls.unlink()
+
+    check("install-and-removal-refresh-rpcd-without-editing-luci", rpcd_hooks)
+
     def defaults():
         for name in ("xr_roaming.config", "xr_mesh.config"):
             config = (package / "files" / name).read_text()
@@ -126,8 +148,10 @@ def main():
                 "usr/share/luci/menu.d/xrmesh.json": "xrmesh-menu.json",
                 "www/luci-static/resources/xrmesh.js": "xrmesh.js",
                 "www/luci-static/resources/view/network/xrmesh.js": "xrmesh-view.js",
+                "www/luci-static/resources/view/status/include/65_wrtmesh.js": "65_wrtmesh.js",
             }.items():
                 assert (root / destination).read_bytes() == (package / "files" / source).read_bytes()
+            assert not (root / "www/luci-static/resources/view/status/include/60_wifi.js").exists()
             link = root / "www/xr-roaming"
             assert link.is_symlink() and os.readlink(link) == "/tmp/xr-roaming-public"
             assert not (root / "usr/lib/xr-roaming/hostapd_cli").exists()

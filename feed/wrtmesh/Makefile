@@ -20,7 +20,7 @@ define Package/wrtmesh
   URL:=https://github.com/DictXiong/wrtmesh
   PROVIDES:=xr-roaming
   DEPENDS:=+hostapd-utils +jq +curl +coreutils-timeout +flock +uci +ubus +uhttpd
-  DEPENDS+=+umdns +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +ucode-mod-rtnl +rpcd +rpcd-mod-ucode +luci-mod-network
+  DEPENDS+=+umdns +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +ucode-mod-rtnl +rpcd +rpcd-mod-ucode +luci-mod-network +luci-mod-status
 endef
 
 define Package/wrtmesh/description
@@ -106,6 +106,16 @@ fi
 exit 0
 endef
 
+define Package/wrtmesh/postrm
+#!/bin/sh
+[ -z "$${IPKG_INSTROOT}" ] || exit 0
+[ "$${IPKG_NO_SCRIPT}" = 1 ] && exit 0
+if [ -x /etc/init.d/rpcd ]; then
+	/etc/init.d/rpcd reload >/dev/null 2>&1 || true
+fi
+exit 0
+endef
+
 define Package/wrtmesh/install
 	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d
 	$(INSTALL_CONF) ./files/xr_roaming.config $(1)/etc/config/xr_roaming
@@ -123,6 +133,8 @@ define Package/wrtmesh/install
 	$(INSTALL_DATA) ./files/xrmesh.js $(1)/www/luci-static/resources/xrmesh.js
 	$(INSTALL_DATA) ./files/xrmesh.css $(1)/www/luci-static/resources/xrmesh.css
 	$(INSTALL_DATA) ./files/xrmesh-view.js $(1)/www/luci-static/resources/view/network/xrmesh.js
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
+	$(INSTALL_DATA) ./files/65_wrtmesh.js $(1)/www/luci-static/resources/view/status/include/
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/wrtmesh.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/
 	$(INSTALL_DIR) $(1)/www

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -15,6 +16,10 @@ def test(root, qemu):
     legacy_mac = '02:00:00:00:00:21'
     new_mac = '02:00:00:00:00:22'
     station_mac = '02:00:00:00:00:70'
+    mld_mac = '02:00:00:00:00:74'
+    ap_mld = '02:00:00:00:01:74'
+    link0 = {'link_id': 0, 'address': '02:00:00:00:00:75', 'bssid': '02:00:00:00:01:75'}
+    link2 = {'link_id': 2, 'address': '02:00:00:00:00:76', 'bssid': '02:00:00:00:01:76'}
     bssid = '02:00:00:00:01:21'
 
     with tempfile.TemporaryDirectory(prefix='xr-mesh-test-') as temp:
@@ -24,6 +29,33 @@ def test(root, qemu):
         state = stage / 'state'
         for d in (config, delta, state):
             d.mkdir()
+        clock = stage / 'uptime'
+        clock.write_text('100.00 0.00\n')
+        # Replace curl with a local fixture that honors the relevant curl options
+        # and writes its header/body files. The fetch classifier runs unchanged.
+        curl = stage / 'curl'
+        curl.write_text('#!' + sys.executable + '\n' + f"""
+import json, sys
+from pathlib import Path
+from urllib.parse import urlsplit
+args = sys.argv[1:]
+url = urlsplit(args[-1])
+assert url.scheme == 'http' and url.hostname in ('192.168.1.21', '192.168.1.22')
+assert url.path == '/cgi-bin/xr-mesh' and url.query in ('', 'identity=1')
+fixture = Path({str(stage)!r}) / (url.hostname + ('-identity' if url.query else '') + '.json')
+if not fixture.exists():
+    sys.exit(7)
+response = json.loads(fixture.read_text())
+status = response['status']
+Path(args[args.index('--dump-header') + 1]).write_bytes(f'HTTP/1.1 {{status}} Fixture\\r\\n\\r\\n'.encode())
+if status != 200:
+    sys.exit(22)
+payload = json.dumps(response['data']).encode()
+if len(payload) > int(args[args.index('--max-filesize') + 1]):
+    sys.exit(63)
+Path(args[args.index('--output') + 1]).write_bytes(payload)
+""")
+        curl.chmod(0o700)
         (config / 'xr_mesh').write_text('# empty\n')
         (config / 'xr_roaming').write_text(f"""
 config roaming 'main'
@@ -36,13 +68,15 @@ config roaming 'main'
             (source / 'mesh.uc').read_text()
             .replace('/tmp/xr-roaming-private/mesh', str(state))
             .replace('/tmp/xr-roaming-public/', str(stage / 'public') + '/')
+            .replace('/usr/bin/curl', str(curl))
+            .replace('/proc/uptime', str(clock))
             .replace('return uci.cursor();', f"return uci.cursor('{config}', '{delta}');")
         )
-        # Substitute the transport at the sampler call site. No live router is queried.
         (stage / 'mesh-sample.uc').write_text(
             (source / 'mesh-sample.uc').read_text()
-            .replace('mesh.fetch(lan, p.address, false)', f"mesh.read_json('{stage}/remote.json', 65536)")
+            .replace('/tmp/dhcp.leases', str(stage / 'dhcp.leases'))
         )
+        (stage / 'dhcp.leases').write_text(f"0 {link2['address']} 192.168.1.43 example-client *\n")
         for name in ('xrmesh.uc', 'xr-mesh.cgi'):
             shutil.copyfile(source / name, stage / name)
         for name in ('mesh-sample.uc', 'xrmesh.uc', 'xr-mesh.cgi'):
@@ -57,7 +91,7 @@ import {{ readfile }} from 'fs';
 export function connect() {{
 	return {{
 		list: (pattern) => pattern == null
-			? ['network.interface.lan', 'hostapd.ap-mld0']
+			? ['network.interface.lan', 'hostapd.ap-iot', 'hostapd.ap-mld0']
 			: [{{ get_status: {{}}, get_clients: {{}} }}],
 		call: (object, method, args) => {{
 			let db = json(readfile('{stage}/bus.json'));
@@ -84,11 +118,23 @@ export function request(cmd, flags, args) {{
             'network.interface:dump': {'interface': [interface]},
             'network.wireless:status': {'radio0': {'interfaces': [{'ifname': 'ap-mld0'}]}},
             'devices': {'br-lan': {'type': 'bridge', 'macaddr': local_mac, 'bridge-members': ['lan1', 'lan2']}},
-            'hostapd.ap-mld0:get_status': {'status': 'ENABLED', 'ssid': 'Home'},
-            'hostapd.ap-mld0:get_clients': {'clients': {
+            'hostapd.ap-iot:get_status': {'status': 'ENABLED', 'ssid': 'IoT',
+                                         'bssid': '02:00:00:00:01:70', 'freq': 2412, 'channel': 1},
+            'hostapd.ap-iot:get_clients': {'clients': {
                 station_mac: {'assoc': True, 'authorized': True, 'signal': -60,
                               'rate': {'rx': 17200000, 'tx': 144120000}},
                 '02:00:00:00:00:71': {'assoc': False, 'authorized': False},
+            }},
+            'hostapd.ap-mld0:get_status': {
+                'status': 'ENABLED', 'ssid': 'Home', 'bssid': link0['bssid'], 'freq': 5180,
+                'links': [{'link_id': 0, 'bssid': link0['bssid'], 'freq': 5180},
+                          {'link_id': 2, 'bssid': link2['bssid'], 'freq': 5975}],
+            },
+            'hostapd.ap-mld0:get_clients': {'clients': {
+                mld_mac: {'assoc': True, 'authorized': True, 'signal': -53, 'assoc_link_id': 0,
+                          'ap_mld_address': ap_mld, 'links': [link0, link2],
+                          'rate': {'rx': 17200000, 'tx': 144120000}},
+                '02:00:00:00:00:77': {'assoc': True, 'authorized': True, 'signal': -67},
             }},
             'umdns:browse': {'_xr-roaming._tcp': {
                 'candidate': {'iface': 'br-lan.1', 'port': 80, 'ipv4': ['192.168.1.22', '192.168.2.1']},
@@ -129,24 +175,50 @@ export function request(cmd, flags, args) {{
             head, data = response.split('\n\n', 1)
             return int(head.split()[1]), json.loads(data)
 
-        remote = {'version': 1, 'revision': '11111111-1111-4111-8111-111111111111',
+        def reply(address, status=None, data=None):
+            fixture = stage / (address + '.json')
+            if status is None:
+                fixture.unlink(missing_ok=True)
+            else:
+                fixture.write_text(json.dumps({'status': status, 'data': data}))
+
+        def at(seconds):
+            clock.write_text(f'{seconds}.00 0.00\n')
+
+        remote = {'version': 1, 'revision': '11111111-1111-4111-8111-111111111111', 'sample_age': 8,
                   'bridge_mac': legacy_mac, 'name': 'Second AP', 'paths': {},
                   'stations': [{'mac': '02:00:00:00:00:72', 'ssid': 'Home', 'signal': -51,
                                 'ipv4': '192.168.1.42', 'ipv6': 'ff02::1', 'rx': 96070000}]}
-        (stage / 'remote.json').write_text(json.dumps(remote))
+        assert rpc('status')['peers'][0]['status'] == 'unknown'
+        reply('192.168.1.21', 200, remote)
         run([str(stage / 'mesh-sample.uc')])
         data = rpc('status')
-        assert data['local']['stations'][0]['mac'] == station_mac and len(data['local']['stations']) == 1
-        station = data['local']['stations'][0]
+        local = {sta['mac']: sta for sta in data['local']['stations']}
+        assert len(local) == 3
+        station = local[station_mac]
         assert (station['ipv4'], station['ipv6']) == ('192.168.1.41', 'fd00::70')
         assert (station['rx'], station['tx']) == (17200000, 144120000)
+        assert (station['freq'], station['channel']) == (2412, 1)
+        assert 'mld' not in local['02:00:00:00:00:77'] and 'freq' not in local['02:00:00:00:00:77']
+        station = local[mld_mac]
+        assert (station['mld'], station['ap_mld'], station['assoc_link_id']) == (mld_mac, ap_mld, 0)
+        assert (station['ipv4'], station['name']) == ('192.168.1.43', 'example-client')
+        links = {link['id']: link for link in station['links']}
+        assert links[0] == {'id': 0, 'mac': link0['address'], 'bssid': link0['bssid'],
+                            'freq': 5180, 'channel': 36, 'signal': -53, 'rx': 17200000, 'tx': 144120000}
+        assert links[2] == {'id': 2, 'mac': link2['address'], 'bssid': link2['bssid'],
+                            'freq': 5975, 'channel': 5}
         assert data['local']['paths'][legacy_mac] == {'bridge': 'br-lan', 'port': 'lan2', 'medium': 'ethernet'}
         assert data['local']['gateway']['port'] == 'lan1'
         station = data['peers'][0]['data']['stations'][0]
-        assert data['peers'][0]['online'] and station['signal'] == -51
+        assert data['peers'][0]['online'] and data['peers'][0]['status'] == 'fresh' and station['signal'] == -51
+        assert data['peers'][0]['age'] == 8 and data['local_updated_at'] - data['peers'][0]['updated_at'] == 8
         assert (station['ipv4'], station['ipv6'], station['rx']) == ('192.168.1.42', None, 96070000)
         assert rpc('discover')['candidates'] == [{'address': '192.168.1.22', 'name': 'candidate'}]
-        assert cgi('192.168.1.21')[0] == 200 and cgi('192.168.1.22')[0] == 403
+        reply('192.168.1.21-identity', 200, {'version': 1, 'bridge_mac': legacy_mac,
+                                           'name': 'Second AP', 'profiles': {'main': [bssid]}})
+        assert rpc('identify', address='192.168.1.21')['peer']['profiles'] == {'main': [bssid]}
+        assert cgi('192.168.1.21')[1]['sample_age'] == 0 and cgi('192.168.1.22')[0] == 403
         assert cgi('192.168.1.22', query='identity=1')[1]['bridge_mac'] == local_mac
         assert cgi('192.168.2.21', query='identity=1')[0] == 403
         assert cgi('192.168.1.21', server='192.168.10.1')[0] == 403
@@ -156,6 +228,60 @@ export function request(cmd, flags, args) {{
         assert rpc('save', address='192.168.1.22', bridge_mac=new_mac, name='Node 2',
                    profiles={}) == {'saved': True}
         assert cgi('192.168.1.22')[0] == 200
+        at(110)
+        old_version = {key: value for key, value in remote.items() if key != 'sample_age'}
+        reply('192.168.1.22', 200, {**old_version, 'bridge_mac': new_mac, 'stations': []})
+        run([str(stage / 'mesh-sample.uc')])
+        peers = {peer['bridge_mac']: peer for peer in rpc('status')['peers']}
+        assert peers[legacy_mac]['age'] == 18
+        assert peers[new_mac]['status'] == 'fresh' and peers[new_mac]['data']['stations'] == []
+        assert peers[new_mac]['age'] == 0
+        at(189)
+        assert cgi('192.168.1.21')[1]['sample_age'] == 79
+        run([str(stage / 'mesh-sample.uc')])
+        peers = {peer['bridge_mac']: peer for peer in rpc('status')['peers']}
+        assert (peers[legacy_mac]['status'], peers[legacy_mac]['age'], peers[legacy_mac]['data']) == ('stale', 97, None)
+        assert peers[new_mac]['status'] == 'fresh'
+        for http, expected in ((403, 'forbidden'), (None, 'unreachable'), (404, 'unavailable'),
+                               (503, 'stale'), (200, 'unavailable')):
+            reply('192.168.1.21', http)
+            run([str(stage / 'mesh-sample.uc')])
+            peer = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == legacy_mac)
+            assert peer['status'] == expected and peer['data'] is None
+        new_revision = '11111111-1111-4111-8111-111111111112'
+        peer_mld = {'mac': mld_mac, 'mld': mld_mac, 'ap_mld': ap_mld, 'ssid': 'Home'}
+        reply('192.168.1.21', 200, {**remote, 'revision': new_revision, 'sample_age': 0, 'stations': [
+            {**peer_mld, 'links': [links[0]], 'signal': -53},
+            {**peer_mld, 'links': [links[2]], 'signal': -57},
+        ]})
+        run([str(stage / 'mesh-sample.uc')])
+        peer = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == legacy_mac)
+        assert peer['status'] == 'fresh' and len(peer['data']['stations']) == 1
+        assert {link['id'] for link in peer['data']['stations'][0]['links']} == {0, 2}
+        many = []
+        for index in range(256):
+            addr = f'02:10:00:00:00:{index:02x}'
+            many.append({**peer_mld, 'mac': addr, 'mld': addr, 'ssid': 'a' * 32, 'name': 'a' * 64,
+                         'ipv6': '2001:db8:1234:1234:1234:1234:1234:1234',
+                         'links': [{**links[0], 'id': link} for link in range(16)]})
+        input_file = stage / 'many.json'
+        input_file.write_text(json.dumps({**remote, 'stations': many}))
+        size_check = run(['-e', f"""
+import * as mesh from '{stage}/mesh.uc';
+let sample = mesh.snapshot(mesh.read_json('{input_file}', 1048576), '{legacy_mac}');
+let wire = sprintf('%J', sample);
+let state = sprintf('%J', {{ seen: 100, data: sample }});
+let cache = {{}};
+for (let i = 0; i < mesh.limit; i++)
+	cache[i] = {{ address: '192.168.1.21', seen: 100, status: 'fresh', data: sample }};
+print({{ truncated: sample.truncated, count: length(sample.stations), wire: length(wire),
+	local: length(state), cache: length(sprintf('%J', cache)) }});
+"""])
+        sizes = json.loads(size_check)
+        assert sizes['truncated'] and 0 < sizes['count'] < 256
+        assert sizes['wire'] < 65536 and sizes['local'] < 65536 and sizes['cache'] < 1048576
+        at(285)
+        assert cgi('192.168.1.21')[0] == 503
         assert rpc('remove', bridge_mac=legacy_mac) == {'saved': True}
         assert cgi('192.168.1.21')[0] == 403
         assert [p['bridge_mac'] for p in rpc('status')['peers']] == [new_mac]

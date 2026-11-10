@@ -6,20 +6,41 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+msgid "%d overlapping client observations hidden"
+msgstr "已隐藏 %d 条重复的客户端观测"
+
+msgid "%d seconds ago"
+msgstr "%d 秒前"
+
 msgid "A BSSID is already used by this device or another peer on this profile."
 msgstr "本机或其他 Mesh 节点已在此漫游配置中使用该 BSSID。"
 
-msgid "A node reached the 256-station reporting limit."
-msgstr "有节点的站点数量超过上报上限，最多显示 256 个。"
+msgid "A node reached its station reporting limit."
+msgstr "有节点已达到站点上报上限。"
 
 msgid "A peer can share station status without BSSIDs. Roaming uses only the BSSIDs approved here."
 msgstr "留空 BSSID 仍可共享站点状态。漫游仅使用在此确认的 BSSID。"
+
+msgid "AP MLD address"
+msgstr "AP MLD 地址"
+
+msgid "AP RX is from the client. AP TX is to the client. Rates are negotiated link rates."
+msgstr "AP 接收指客户端发往 AP，AP 发送指 AP 发往客户端。速率为链路协商速率。"
+
+msgid "AP RX rate"
+msgstr "AP 接收速率"
+
+msgid "AP TX rate"
+msgstr "AP 发送速率"
 
 msgid "Add Mesh peer"
 msgstr "添加节点"
 
 msgid "Add the peer on both devices to exchange station and topology snapshots. Peer changes apply to this device."
 msgstr "在两台设备上互相添加节点，即可交换站点和拓扑快照。这里的设置仅应用于本机。"
+
+msgid "Also reported by %s"
+msgstr "%s 也报告了该客户端"
 
 msgid "Associated Stations"
 msgstr "已连接站点"
@@ -33,6 +54,9 @@ msgstr "至少连接了 %d 个站点"
 msgid "BSSIDs for %s (optional)"
 msgstr "%s 的 BSSID（可选）"
 
+msgid "Band / MLO link"
+msgstr "频段／MLO 链路"
+
 msgid "Bridge MAC"
 msgstr "网桥 MAC"
 
@@ -44,6 +68,15 @@ msgstr "网桥与网口详情"
 
 msgid "Cancel"
 msgstr "取消"
+
+msgid "Client details"
+msgstr "客户端详情"
+
+msgid "Client name"
+msgstr "客户端名称"
+
+msgid "Clients also reported by another node"
+msgstr "其他节点也报告了这些客户端"
 
 msgid "Close"
 msgstr "关闭"
@@ -72,6 +105,12 @@ msgstr "每项漫游配置最多可输入三个不同的单播 BSSID。"
 msgid "Ethernet"
 msgstr "以太网"
 
+msgid "Frequency"
+msgstr "频率"
+
+msgid "Fresh peer snapshot"
+msgstr "对端快照有效"
+
 msgid "Gateway"
 msgstr "网关"
 
@@ -81,8 +120,14 @@ msgstr "主机"
 msgid "IPv4 address"
 msgstr "IPv4 地址"
 
+msgid "Link %d"
+msgstr "链路 %d"
+
 msgid "MAC address"
 msgstr "MAC 地址"
+
+msgid "MLD address"
+msgstr "MLD 地址"
 
 msgid "Mbit/s"
 msgstr "Mbit/s"
@@ -108,6 +153,9 @@ msgstr "Mesh 拓扑"
 msgid "Name"
 msgstr "名称"
 
+msgid "Negotiated rate (AP RX / TX)"
+msgstr "协商速率（AP 收／发）"
+
 msgid "Network"
 msgstr "网络"
 
@@ -119,6 +167,9 @@ msgstr "暂无近期快照"
 
 msgid "No new peers discovered on the management LAN."
 msgstr "管理 LAN 上未发现新节点。"
+
+msgid "No peer wireless clients"
+msgstr "暂无对端无线客户端"
 
 msgid "No peers configured."
 msgstr "尚未添加节点。"
@@ -138,8 +189,26 @@ msgstr "节点之间报告的路径"
 msgid "Peer IPv4 address"
 msgstr "节点 IPv4 地址"
 
+msgid "Peer denied snapshot access"
+msgstr "对端拒绝了快照读取请求"
+
+msgid "Peer is unreachable"
+msgstr "对端节点不可达"
+
+msgid "Peer snapshot expired"
+msgstr "对端快照已过期"
+
+msgid "Peer snapshot is unavailable"
+msgstr "暂时无法获取对端快照"
+
 msgid "Peer status"
 msgstr "节点状态"
+
+msgid "Peer wireless clients"
+msgstr "对端无线客户端"
+
+msgid "Permission to view Mesh status was denied."
+msgstr "没有权限查看 Mesh 状态。"
 
 msgid "Port unknown"
 msgstr "网口未知"
@@ -171,6 +240,9 @@ msgstr "共用网关"
 msgid "Signal"
 msgstr "信号"
 
+msgid "Snapshot updated %s"
+msgstr "快照更新于 %s"
+
 msgid "Station count unavailable"
 msgstr "站点数未知"
 
@@ -198,8 +270,14 @@ msgstr "本机已添加 15 个节点。"
 msgid "Verify the bridge MAC and BSSIDs before saving this discovered peer. Discovery is unauthenticated."
 msgstr "发现过程未验证节点身份。保存前请核对网桥 MAC 地址和 BSSID。"
 
+msgid "Waiting for a peer snapshot"
+msgstr "等待对端快照"
+
 msgid "Wireless"
 msgstr "无线"
+
+msgid "Wireless interface"
+msgstr "无线接口"
 
 msgid "dBm"
 msgstr "dBm"
