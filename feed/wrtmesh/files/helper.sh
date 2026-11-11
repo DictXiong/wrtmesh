@@ -1,13 +1,13 @@
 #!/bin/sh
-# Site-specific C7 neighbor exchange. No wireless/UCI writes or client steering.
+# Validated neighbor exchange. No wireless/UCI writes or client steering.
 set -eu
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
-ROOT=/usr/lib/xr-roaming
-STATE=/tmp/xr-roaming-private
-PUBLIC=/tmp/xr-roaming-public
-BASE_STATE=/tmp/xr-roaming-private
-BASE_PUBLIC=/tmp/xr-roaming-public
-WEB=/www/xr-roaming
+ROOT=/usr/lib/wrtmesh
+STATE=/tmp/wrtmesh-private
+PUBLIC=/tmp/wrtmesh-public
+BASE_STATE=/tmp/wrtmesh-private
+BASE_PUBLIC=/tmp/wrtmesh-public
+WEB=/www/wrtmesh
 CTRL=/var/run/hostapd
 CLI=/usr/sbin/hostapd_cli
 UCI=/sbin/uci
@@ -41,7 +41,7 @@ now() {
  printf '%s\n' "$tick"
 }
 note() { printf '%s [%s] %s\n' "$(now)" "$ROAM_PROFILE" "$*" >&2; }
-get() { "$UCI" -q get "xr_roaming.$ROAM_PROFILE.$1" 2>/dev/null || true; }
+get() { "$UCI" -q get "wrtmesh.$ROAM_PROFILE.$1" 2>/dev/null || true; }
 select_profile() {
  ROAM_PROFILE=$1
  case "$ROAM_PROFILE" in ""|*[!A-Za-z0-9_]* ) return 1;; esac
@@ -67,27 +67,27 @@ select_profile() {
 
 list_profiles() {
  local raw profiles profile enabled seen="" count=0
- raw=$("$UCI" -q show xr_roaming 2>/dev/null) || return 1
+ raw=$("$UCI" -q show wrtmesh 2>/dev/null) || return 1
  [ "${#raw}" -le 65536 ] || return 1
- profiles=$(printf '%s\n' "$raw" | sed -n 's/^xr_roaming\.\([^.=]*\)=roaming$/\1/p')
+ profiles=$(printf '%s\n' "$raw" | sed -n 's/^wrtmesh\.\([^.=]*\)=roaming$/\1/p')
  # Validate the whole list before emitting even the first instance.
  for profile in $profiles; do
   select_profile "$profile" || return 1
   case " $seen " in *" $profile "*) return 1;; esac
   seen="$seen $profile"; count=$((count+1))
   [ "$count" -le 17 ] || return 1
-  [ "$("$UCI" -q get "xr_roaming.$profile" 2>/dev/null)" = roaming ] || return 1
-  enabled=$("$UCI" -q get "xr_roaming.$profile.enabled" 2>/dev/null || true)
+  [ "$("$UCI" -q get "wrtmesh.$profile" 2>/dev/null)" = roaming ] || return 1
+  enabled=$("$UCI" -q get "wrtmesh.$profile.enabled" 2>/dev/null || true)
   case "$enabled" in ''|0|1) :;; *) return 1;; esac
  done
  for profile in $profiles; do
-  [ "$("$UCI" -q get "xr_roaming.$profile.enabled" 2>/dev/null)" != 1 ] || printf '%s\n' "$profile"
+  [ "$("$UCI" -q get "wrtmesh.$profile.enabled" 2>/dev/null)" != 1 ] || printf '%s\n' "$profile"
  done
 }
 
 load_config() {
  local section name bridge_mac="" raw_interval raw_ttl raw_bssids raw_section raw_ssid raw_iface raw_peer_mode peer_id raw_mlo raw_max_links legacy_metadata=false
- [ "$("$UCI" -q get "xr_roaming.$ROAM_PROFILE" 2>/dev/null)" = roaming ] || return 1
+ [ "$("$UCI" -q get "wrtmesh.$ROAM_PROFILE" 2>/dev/null)" = roaming ] || return 1
  raw_mlo=$(get mlo); raw_max_links=$(get max_links)
  if [ -z "$raw_mlo" ] && [ -z "$raw_max_links" ]; then
   [ -n "$EXPECTED_IFACE" ] || return 1
@@ -123,11 +123,11 @@ load_config() {
    for peer_id in $(get peers); do
     case "$peer_id" in ""|*[!A-Za-z0-9_]* ) return 1;; esac
     [ "${#peer_id}" -le 64 ] || return 1
-    [ "$("$UCI" -q get "xr_roaming.$peer_id" 2>/dev/null)" = peer ] || return 1
+    [ "$("$UCI" -q get "wrtmesh.$peer_id" 2>/dev/null)" = peer ] || return 1
     "$JQ" -cn --arg id "$peer_id" \
-     --arg address "$("$UCI" -q get "xr_roaming.$peer_id.address" 2>/dev/null)" \
-     --arg mac "$("$UCI" -q get "xr_roaming.$peer_id.bridge_mac" 2>/dev/null | tr A-F a-f)" \
-     --arg bssids "$("$UCI" -q get "xr_roaming.$peer_id.${ROAM_PROFILE}_bssid" 2>/dev/null)" \
+     --arg address "$("$UCI" -q get "wrtmesh.$peer_id.address" 2>/dev/null)" \
+     --arg mac "$("$UCI" -q get "wrtmesh.$peer_id.bridge_mac" 2>/dev/null | tr A-F a-f)" \
+     --arg bssids "$("$UCI" -q get "wrtmesh.$peer_id.${ROAM_PROFILE}_bssid" 2>/dev/null)" \
      '{id:$id,address:$address,bridge_mac:$mac,bssids:($bssids|ascii_downcase|split(" ")|map(select(length>0)))}' \
      >> "$STATE/fleet.config.lines" || return 1
    done
@@ -162,7 +162,7 @@ load_config() {
     peer_bssids:($allowed|ascii_downcase|split(" ")|map(select(length>0))),
     interval:$interval,ttl:$ttl} |
     if $peer_mode=="fleet" then del(.peer,.peer_mac,.peer_bssids)+{peer_mode:"fleet",peers:$peers[0]} else . end' > "$STATE/config.next" || return 1
- if [ -r "$CONFIGDIR/xr_mesh" ] && grep -q '^config[[:space:]]' "$CONFIGDIR/xr_mesh"; then
+ if [ -r "$CONFIGDIR/wrtmesh_peers" ] && grep -q '^config[[:space:]]' "$CONFIGDIR/wrtmesh_peers"; then
   "$TIMEOUT" 5 /usr/bin/ucode "$ROOT/mesh-sample.uc" roaming "$ROAM_PROFILE" > "$STATE/mesh.peers" || return 1
   if "$JQ" -e 'type=="array" and length>0' "$STATE/mesh.peers" >/dev/null; then
    if [ -z "$bridge_mac" ]; then
@@ -228,9 +228,9 @@ private_dirs() {
 
 config_signature() {
  local name
- set -- "$CONFIGDIR/xr_roaming" "$CONFIGDIR/wireless" "$CONFIGDIR/network"
- [ ! -f "$CONFIGDIR/xr_mesh" ] || set -- "$@" "$CONFIGDIR/xr_mesh"
- for name in xr_roaming wireless network; do
+ set -- "$CONFIGDIR/wrtmesh" "$CONFIGDIR/wireless" "$CONFIGDIR/network"
+ [ ! -f "$CONFIGDIR/wrtmesh_peers" ] || set -- "$@" "$CONFIGDIR/wrtmesh_peers"
+ for name in wrtmesh wireless network; do
   [ ! -f "$DELTADIR/$name" ] || set -- "$@" "$DELTADIR/$name"
  done
  [ ! -f "$BASE_STATE/reload.token" ] || set -- "$@" "$BASE_STATE/reload.token"
@@ -349,7 +349,7 @@ load_lan_source() {
 }
 
 fetch_peer_one() {
- local revision previous tick source_ip report_count peer_state=${1:-$STATE}
+ local revision previous tick source_ip report_count peer_state=${1:-$STATE} endpoint=wrtmesh attempt=0 code
  fetch_reason=ok
  tick=$(now)
  # Cache the actual DHCP LAN source; invalidate on local changes/full audit/failure.
@@ -361,22 +361,38 @@ fetch_peer_one() {
     (.mask as $mask | ($source|in_subnet($address;$mask)))' \
     "$STATE/lan-status.json" >/dev/null || { fetch_reason=peer_outside_lan; return 1; }
  fi
- # Never follow redirects, inherit proxies, use credentials, or accept an arbitrary URL.
- "$CURL" --disable --silent --show-error --fail --noproxy '*' --proto '=http' --max-redirs 0 \
-   --interface "$source_ip" \
-   --connect-timeout 2 --max-time 5 --max-filesize 16384 \
-   --header 'Cache-Control: no-cache' \
-   --output "$peer_state/peer.download" "http://$roam_peer/xr-roaming/$URI?r=$tick" 2>/dev/null || {
+ if [ -r "$peer_state/endpoint" ]; then
+  IFS= read -r endpoint < "$peer_state/endpoint" || endpoint=wrtmesh
+ fi
+ case "$endpoint" in wrtmesh|xr-roaming) :;; *) endpoint=wrtmesh;; esac
+ while :; do
+  : > "$peer_state/peer.headers"
+  # Never follow redirects, inherit proxies, use credentials, or accept an arbitrary URL.
+  if "$CURL" --disable --silent --show-error --fail --noproxy '*' --proto '=http' --max-redirs 0 \
+    --interface "$source_ip" \
+    --connect-timeout 2 --max-time 5 --max-filesize 16384 \
+    --header 'Cache-Control: no-cache' --dump-header "$peer_state/peer.headers" \
+    --output "$peer_state/peer.download" "http://$roam_peer/$endpoint/$URI?r=$tick" 2>/dev/null; then
+   break
+  fi
+  code=$(awk '$1 ~ /^HTTP\/[0-9.]+$/ {code=$2} END {print code}' "$peer_state/peer.headers")
+  if [ "$attempt" = 0 ] && [ "$code" = 404 ]; then
+   # Old v1 nodes publish only this read-only path. Cache the validated choice.
+   case "$endpoint" in wrtmesh) endpoint=xr-roaming;; *) endpoint=wrtmesh;; esac
+   attempt=1
+   continue
+  fi
   cached_source_ip=""
   load_lan_source || return 1
-  fetch_reason=peer_download_failed; return 1;
- }
+  fetch_reason=peer_download_failed; return 1
+ done
  [ "$(wc -c < "$peer_state/peer.download")" -le 16384 ] || { fetch_reason=peer_size_invalid; return 1; }
  "$JQ" -ec -L "$ROOT" --arg ssid "$roam_ssid" --arg mac "$roam_peer_mac" \
    --argjson allowed "$roam_allowed" --slurpfile own "$STATE/links.json" \
    'include "common"; select(public_ok($ssid;$mac;$allowed)) |
     select(([.reports[].bssid] - [$own[0][].bssid] | length) == (.reports|length))' \
    "$peer_state/peer.download" > "$peer_state/peer.next" 2>/dev/null || { fetch_reason=peer_payload_invalid; return 1; }
+ printf '%s\n' "$endpoint" > "$peer_state/endpoint" || return 1
  "$JQ" -r '.revision,(.reports|length)' "$peer_state/peer.next" > "$peer_state/peer.fields" || return 1
  { IFS= read -r revision && IFS= read -r report_count; } < "$peer_state/peer.fields" || return 1
  case "$report_count" in 1|2|3) :;; *) fetch_reason=peer_payload_invalid; return 1;; esac

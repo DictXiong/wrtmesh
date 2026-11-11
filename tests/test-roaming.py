@@ -33,7 +33,7 @@ def main():
         parser.error('jq is required')
     source = args.package_root.resolve() / 'files'
     names = {'helper.sh': 'helper.sh', 'common.jq': 'common.jq',
-             'cli-report.jq': 'cli-report.jq', 'xr_roaming.init': 'init.sh'}
+             'cli-report.jq': 'cli-report.jq', 'wrtmesh.init': 'init.sh'}
     for name in names:
         if not (source / name).is_file():
             parser.error(f'missing package input: {source / name}')
@@ -45,15 +45,15 @@ def main():
         for binary in ['bin/busybox', 'usr/bin/jq']:
             if not (args.c7_rootfs / binary).is_file():
                 parser.error(f'missing target binary: {binary}')
-        env['XR_C7_ROOTFS'] = str(args.c7_rootfs)
-        env['XR_QEMU'] = args.qemu
+        env['WRTMESH_C7_ROOTFS'] = str(args.c7_rootfs)
+        env['WRTMESH_QEMU'] = args.qemu
     else:
-        env.pop('XR_C7_ROOTFS', None)
-        env.pop('XR_QEMU', None)
+        env.pop('WRTMESH_C7_ROOTFS', None)
+        env.pop('WRTMESH_QEMU', None)
     pins = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
             for name in names}
-    fixtures = Path(__file__).resolve().parent / 'xr-roaming'
-    with tempfile.TemporaryDirectory(prefix='xr-roaming-suite-') as temp:
+    fixtures = Path(__file__).resolve().parent / 'wrtmesh'
+    with tempfile.TemporaryDirectory(prefix='wrtmesh-suite-') as temp:
         stage = Path(temp)
         shutil.copytree(fixtures, stage / 'tests')
         (stage / 'helper-v4').mkdir()

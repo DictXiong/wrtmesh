@@ -1,8 +1,0 @@
-{
-	"admin/network/xrmesh": {
-		"title": "Mesh",
-		"order": 65,
-		"action": { "type": "view", "path": "network/xrmesh" },
-		"depends": { "acl": [ "luci-app-xrmesh" ] }
-	}
-}

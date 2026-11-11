@@ -4,7 +4,7 @@ from pathlib import Path
 import fcntl,hashlib,json,os,re,resource,shlex,shutil,socket,subprocess,time
 resource.setrlimit(resource.RLIMIT_CORE,(0,0))
 T=Path(__file__).resolve().parent;R=T.parent;S=R/'helper-v4'
-os.environ['XR_ONLY_DELTA']='1'
+os.environ['WRTMESH_ONLY_DELTA']='1'
 ns={'__file__':str(T/'targeted.py'),'__name__':'fixture_definitions'}
 exec(compile((T/'targeted.py').read_text().split("record('bulk_config_fields_preserve_SSID_bytes_and_no_eval'")[0],str(T/'targeted.py'),'exec'),ns)
 Multi=ns['Multi'];until=ns['until'];C7=ns['C7'];SHELL=ns['g']['SHELL'];QEMU=ns['QEMU'];ROOT=ns['ROOT']
@@ -87,9 +87,9 @@ def steady_and_invalidation():
   assert m.count('show_neighbor')==show+1 and m.writes()==2,'generation must seed shared MLD cache even matching observed'
   path=m.ctrl/'phy0.0-ap1';path.unlink();sock=socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM);sock.bind(str(path));m.sockets.append(sock)
   m.step(220);assert m.count('show_neighbor')==show+2 and m.writes()==3
-  (m.deltadir/'xr_roaming').write_text('pending metadata delta\n');m.step(250)
+  (m.deltadir/'wrtmesh').write_text('pending metadata delta\n');m.step(250)
   assert m.count('show_neighbor')==show+3
-  (m.deltadir/'xr_roaming').unlink();(m.state/'reload.token').write_text('reload-one\n');m.step(280)
+  (m.deltadir/'wrtmesh').unlink();(m.state/'reload.token').write_text('reload-one\n');m.step(280)
   c=m.count('show_neighbor');(m.state/'reload.token').write_text('reload-two\n');m.step(310);assert m.count('show_neighbor')==c+1
   value='家用%"\\';m.rename('iot',value);m.step(340)
   assert json.loads(m.pub('iot').read_text())['ssid']==value

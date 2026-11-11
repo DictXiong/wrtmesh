@@ -46,8 +46,7 @@ def metadata_ok:
   . as $c | (.iface|iface_ok) and (.mld|type)=="boolean" and
   (.max_links|type)=="number" and (.max_links|floor)==.max_links and
   .max_links>=1 and .max_links<=3 and
-  (if .mld then (.iface|startswith("ap-mld")) and (.iface[6:]|uint_string(15))
-   else .max_links==1 and (.iface|startswith("ap-mld")|not) end) and
+  (if .mld then true else .max_links==1 end) and
   (if .legacy_metadata then
     legacy_profile_meta[$c.profile] as $meta |
     $meta!=null and .iface==$meta.iface and .mld==$meta.mld and .max_links==$meta.max_links

@@ -16,7 +16,7 @@ define Package/wrtmesh
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=WirelessAPD
-  TITLE:=XR1710G roaming assistance and mesh visibility
+  TITLE:=Multi-AP roaming assistance and Mesh visibility
   URL:=https://github.com/DictXiong/wrtmesh
   PROVIDES:=xr-roaming
   DEPENDS:=+hostapd-utils +jq +curl +coreutils-timeout +flock +uci +ubus +uhttpd
@@ -25,12 +25,12 @@ endef
 
 define Package/wrtmesh/description
   Multi-AP peer discovery, station and topology visibility, and wired-backhaul
-  roaming assistance for supported XR1710G C7 hostapd builds.
+  roaming assistance for supported hostapd builds.
 endef
 
 define Package/wrtmesh/conffiles
-/etc/config/xr_roaming
-/etc/config/xr_mesh
+/etc/config/wrtmesh
+/etc/config/wrtmesh_peers
 endef
 
 define Build/Prepare
@@ -48,20 +48,27 @@ define Package/wrtmesh/preinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
 [ "$${IPKG_NO_SCRIPT}" = 1 ] && exit 0
+[ ! -L /etc ] && [ ! -L /etc/config ] || exit 1
+was_running=
 restore_service() {
-	[ ! -x /etc/init.d/xr_roaming ] || /etc/init.d/xr_roaming start >/dev/null 2>&1 || true
+	for service in $$was_running; do
+		[ ! -x "$$service" ] || "$$service" start >/dev/null 2>&1 || true
+	done
 }
-if [ -x /etc/init.d/xr_roaming ]; then
-	/etc/init.d/xr_roaming stop || exit 1
-fi
+for service in /etc/init.d/wrtmesh /etc/init.d/xr_roaming; do
+	if [ -x "$$service" ] && "$$service" status >/dev/null 2>&1; then
+		was_running="$$was_running $$service"
+	fi
+done
+for service in /etc/init.d/wrtmesh /etc/init.d/xr_roaming; do
+	[ ! -x "$$service" ] || "$$service" stop || { restore_service; exit 1; }
+done
 # An old shell must not continue running while its jq modules are replaced.
 # A package-name transition may already have removed the old init script.
-base=/tmp/xr-roaming-private
-[ ! -L "$$base" ] || exit 1
 count=0
 # The main lock and every old/new profile lock live at depth zero or one.
 # Do not infer the old worker set from the newly supplied UCI configuration.
-for state in "$$base" "$$base"/*; do
+for state in /tmp/wrtmesh-private /tmp/wrtmesh-private/* /tmp/xr-roaming-private /tmp/xr-roaming-private/*; do
 	if [ -L "$$state" ]; then
 		echo 'wrtmesh: refusing a symlinked runtime lock directory' >&2
 		restore_service
@@ -92,6 +99,32 @@ for state in "$$base" "$$base"/*; do
 		sleep 1
 	done
 done
+# Snapshot predecessor conffiles before APK removes the old package payload.
+# The installed migration helper performs the rename after the new files exist.
+archive=/etc/wrtmesh/migration
+for dir in /etc/wrtmesh "$$archive"; do
+	[ ! -L "$$dir" ] || { restore_service; exit 1; }
+	mkdir -p "$$dir" && chmod 700 "$$dir" || { restore_service; exit 1; }
+done
+[ ! -L "$$archive/complete" ] || { restore_service; exit 1; }
+if [ ! -e "$$archive/complete" ]; then
+	for pair in xr_roaming:roaming xr_mesh:peers; do
+		old=$${pair%:*}; name=$${pair#*:}
+		for suffix in '' .apk-save; do
+			source=/etc/config/$$old$$suffix
+			target=$$archive/$$name$$suffix.uci
+			for file in "$$source" "$$target" "$$target.next"; do
+				[ ! -L "$$file" ] && { [ ! -e "$$file" ] || { [ -f "$$file" ] && [ "$$(wc -c < "$$file")" -le 65536 ]; }; } || { restore_service; exit 1; }
+			done
+			[ -f "$$source" ] || continue
+			if [ -f "$$target" ]; then
+				cmp -s "$$source" "$$target" || { restore_service; exit 1; }
+			else
+				(umask 077; cp "$$source" "$$target.next" && chmod 600 "$$target.next" && mv "$$target.next" "$$target") || { restore_service; exit 1; }
+			fi
+		done
+	done
+fi
 exit 0
 endef
 
@@ -99,6 +132,7 @@ define Package/wrtmesh/postinst
 #!/bin/sh
 [ -z "$${IPKG_INSTROOT}" ] || exit 0
 [ "$${IPKG_NO_SCRIPT}" = 1 ] && exit 0
+/usr/lib/wrtmesh/migrate-config.sh || exit 1
 # Reload the ucode plugin and ACL on a running LuCI installation.
 if [ -x /etc/init.d/rpcd ]; then
 	/etc/init.d/rpcd reload >/dev/null 2>&1 || true
@@ -118,27 +152,30 @@ endef
 
 define Package/wrtmesh/install
 	$(INSTALL_DIR) $(1)/etc/config $(1)/etc/init.d
-	$(INSTALL_CONF) ./files/xr_roaming.config $(1)/etc/config/xr_roaming
-	$(INSTALL_CONF) ./files/xr_mesh.config $(1)/etc/config/xr_mesh
-	$(INSTALL_BIN) ./files/xr_roaming.init $(1)/etc/init.d/xr_roaming
-	$(INSTALL_DIR) $(1)/usr/lib/xr-roaming
-	$(INSTALL_BIN) ./files/helper.sh ./files/mesh-daemon.sh $(1)/usr/lib/xr-roaming/
-	$(INSTALL_DATA) ./files/common.jq ./files/cli-report.jq ./files/mesh.uc ./files/mesh-sample.uc $(1)/usr/lib/xr-roaming/
+	$(INSTALL_CONF) ./files/wrtmesh.config $(1)/etc/config/wrtmesh
+	$(INSTALL_CONF) ./files/wrtmesh_peers.config $(1)/etc/config/wrtmesh_peers
+	$(INSTALL_BIN) ./files/wrtmesh.init $(1)/etc/init.d/wrtmesh
+	$(INSTALL_DIR) $(1)/usr/lib/wrtmesh
+	$(INSTALL_BIN) ./files/helper.sh ./files/mesh-daemon.sh ./files/migrate-config.sh $(1)/usr/lib/wrtmesh/
+	$(INSTALL_DATA) ./files/common.jq ./files/cli-report.jq ./files/mesh.uc ./files/mesh-sample.uc $(1)/usr/lib/wrtmesh/
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode $(1)/usr/share/rpcd/acl.d $(1)/usr/share/luci/menu.d
-	$(INSTALL_DATA) ./files/xrmesh.uc $(1)/usr/share/rpcd/ucode/xrmesh.uc
-	$(INSTALL_DATA) ./files/xrmesh-acl.json $(1)/usr/share/rpcd/acl.d/xrmesh.json
-	$(INSTALL_DATA) ./files/xrmesh-menu.json $(1)/usr/share/luci/menu.d/xrmesh.json
+	$(INSTALL_DATA) ./files/wrtmesh.uc $(1)/usr/share/rpcd/ucode/wrtmesh.uc
+	$(INSTALL_DATA) ./files/wrtmesh-acl.json $(1)/usr/share/rpcd/acl.d/wrtmesh.json
+	$(INSTALL_DATA) ./files/wrtmesh-menu.json $(1)/usr/share/luci/menu.d/wrtmesh.json
 	$(INSTALL_DIR) $(1)/www/cgi-bin $(1)/www/luci-static/resources/view/network
-	$(INSTALL_BIN) ./files/xr-mesh.cgi $(1)/www/cgi-bin/xr-mesh
-	$(INSTALL_DATA) ./files/xrmesh.js $(1)/www/luci-static/resources/xrmesh.js
-	$(INSTALL_DATA) ./files/xrmesh.css $(1)/www/luci-static/resources/xrmesh.css
-	$(INSTALL_DATA) ./files/xrmesh-view.js $(1)/www/luci-static/resources/view/network/xrmesh.js
+	$(INSTALL_BIN) ./files/wrtmesh.cgi $(1)/www/cgi-bin/wrtmesh
+	$(LN) wrtmesh $(1)/www/cgi-bin/xr-mesh
+	$(INSTALL_DATA) ./files/wrtmesh.js $(1)/www/luci-static/resources/wrtmesh.js
+	$(INSTALL_DATA) ./files/wrtmesh.css $(1)/www/luci-static/resources/wrtmesh.css
+	$(INSTALL_DATA) ./files/wrtmesh-view.js $(1)/www/luci-static/resources/view/network/wrtmesh.js
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
 	$(INSTALL_DATA) ./files/65_wrtmesh.js $(1)/www/luci-static/resources/view/status/include/
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/i18n
 	$(INSTALL_DATA) $(PKG_BUILD_DIR)/wrtmesh.zh-cn.lmo $(1)/usr/lib/lua/luci/i18n/
 	$(INSTALL_DIR) $(1)/www
-	$(LN) /tmp/xr-roaming-public $(1)/www/xr-roaming
+	$(LN) /tmp/wrtmesh-public $(1)/www/wrtmesh
+	# Read-only HTTP v1 aliases for existing peer nodes; no old local API names.
+	$(LN) /tmp/wrtmesh-public $(1)/www/xr-roaming
 endef
 
 $(eval $(call BuildPackage,wrtmesh))

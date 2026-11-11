@@ -1,0 +1,8 @@
+{
+	"admin/network/wrtmesh": {
+		"title": "Mesh",
+		"order": 65,
+		"action": { "type": "view", "path": "network/wrtmesh" },
+		"depends": { "acl": [ "luci-app-wrtmesh" ] }
+	}
+}

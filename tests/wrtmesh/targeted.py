@@ -7,12 +7,12 @@ resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 T=Path(__file__).resolve().parent
 R=T.parent
 S=R/'helper-v4'
-ROOT=Path(os.environ['XR_C7_ROOTFS']) if os.environ.get('XR_C7_ROOTFS') else None
-QEMU=os.environ.get('XR_QEMU') or shutil.which('qemu-aarch64')
+ROOT=Path(os.environ['WRTMESH_C7_ROOTFS']) if os.environ.get('WRTMESH_C7_ROOTFS') else None
+QEMU=os.environ.get('WRTMESH_QEMU') or shutil.which('qemu-aarch64')
 C7=[QEMU,'-L',str(ROOT),str(ROOT/'bin/busybox'),'ash'] if ROOT else ['/bin/sh']
 pins={n:hashlib.sha256((S/n).read_bytes()).hexdigest()for n in ['helper.sh','init.sh','common.jq','cli-report.jq']}
 results=[]
-DELTA_ONLY=os.environ.get('XR_ONLY_DELTA')=='1'
+DELTA_ONLY=os.environ.get('WRTMESH_ONLY_DELTA')=='1'
 OUT=R/('targeted-debug-result.json'if DELTA_ONLY else'targeted-tests-result.json')
 def save():
  OUT.write_text(json.dumps({'scope':'Local inert fixtures only; no AP or PI calls.','sourceSHA':pins,'results':results,'passed':all(x['passed']for x in results)},indent=2)+'\n')
@@ -59,7 +59,7 @@ class Multi(OriginalMulti):
  def __init__(self):
   super().__init__()
   self.cfgdir=self.p/'etc-config';self.cfgdir.mkdir()
-  for name in ['xr_roaming','wireless','network']:(self.cfgdir/name).symlink_to(self.config)
+  for name in ['wrtmesh','wireless','network']:(self.cfgdir/name).symlink_to(self.config)
   self.deltadir=self.p/'delta';self.deltadir.mkdir()
   self.pidfile=self.p/'hostapd-pids';self.pidfile.write_text('4000 4001\n')
   pidof=self.bin/'pidof';pidof.write_text('#!/bin/sh\n[ "$1" = hostapd ] || exit 1\ncat '+shlex.quote(str(self.pidfile))+'\n');pidof.chmod(0o700)
@@ -182,7 +182,7 @@ def procd_reload():
  m=Multi()
  try:
   helper=m.p/'inert-profiles';helper.write_text('#!/bin/sh\n[ "$1" = profiles ] || exit 1\nprintf "%s\\n" guest\n');helper.chmod(0o700)
-  init=m.p/'init';init.write_text((S/'init.sh').read_text().replace('/tmp/xr-roaming-private',str(m.state)).replace('/usr/lib/xr-roaming/helper.sh',str(helper)))
+  init=m.p/'init';init.write_text((S/'init.sh').read_text().replace('/tmp/wrtmesh-private',str(m.state)).replace('/usr/lib/wrtmesh/migrate-config.sh', 'true').replace('/usr/lib/wrtmesh/helper.sh',str(helper)))
   output=m.p/'reload-sequence'
   script='''uci() { case "$*" in *guest.enabled) printf '1\\n';; *) printf '0\\n';; esac; }
 procd_open_instance() { printf 'OPEN %s\\n' "$1" >> "$OUT"; }

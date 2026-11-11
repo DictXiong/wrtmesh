@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 set -eu
 umask 077
-base=/tmp/xr-roaming-private
+base=/tmp/wrtmesh-private
 state=$base/mesh
 for dir in "$base" "$state"; do
 	[ ! -L "$dir" ] || exit 1
@@ -18,7 +18,7 @@ trap 'if [ -n "$child" ]; then kill "$child" 2>/dev/null || :; wait "$child" || 
 trap 'rm -f "$state/local.json" "$state/peers.json"' EXIT
 while :; do
 	read -r tick rest < /proc/uptime
-	/usr/bin/timeout -k 2 50 /usr/bin/ucode /usr/lib/xr-roaming/mesh-sample.uc &
+	/usr/bin/timeout -k 2 50 /usr/bin/ucode /usr/lib/wrtmesh/mesh-sample.uc &
 	child=$!
 	wait "$child" || :
 	child=

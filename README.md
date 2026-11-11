@@ -6,15 +6,15 @@ topology.
 ## Install or upgrade
 
 Use the signed noarch APK and matching public key from
-[Releases](https://github.com/DictXiong/wrtmesh/releases). On APK-based C7
+[Releases](https://github.com/DictXiong/wrtmesh/releases). On APK-based OpenWrt
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.2.0-r1.apk
+apk add ./wrtmesh-6.3.0-r1.apk
 ```
 
-Package upgrades preserve local configuration in `/etc/config/xr_roaming` and
-`/etc/config/xr_mesh`. Firmware sysupgrade also preserves these files when
+Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
+`/etc/config/wrtmesh_peers`. Firmware sysupgrade also preserves these files when
 settings are retained.
 
 The APK provides **Network → Mesh** and the **Mesh** section of **Status →
@@ -45,9 +45,9 @@ LAN IPv4 address and bridge MAC. Review any discovered BSSIDs before saving.
 Enroll peers on both devices to exchange station and topology snapshots.
 
 The list includes previously provisioned peers. LuCI stores local additions,
-edits and removals in `/etc/config/xr_mesh`. A removal there also masks an older
-provisioned entry with the same bridge MAC. The local ESS definitions still
-come from `/etc/config/xr_roaming`. For each ESS, the roaming worker uses the
+edits and removals in `/etc/config/wrtmesh_peers`. A removal there also masks an older
+provisioned entry with the same bridge MAC. Local roaming profiles are also managed on this page and stored in
+`/etc/config/wrtmesh`. For each ESS, the roaming worker uses the
 peer BSSIDs explicitly approved in LuCI or the existing provisioning. A peer
 can share station and topology snapshots with no approved BSSIDs.
 
@@ -78,36 +78,48 @@ address on the management LAN. The HTTP exchange uses plaintext and offers no
 cryptographic authentication. Local peer edits go through LuCI's authenticated
 RPC interface. Use the existing firewall policy to isolate the management LAN.
 
+## Local roaming profiles
+
+In **Network → Mesh → Local roaming profiles**, add a profile, select a local
+SSID, and enable or disable roaming assistance. The SSID selector reads actual
+`wifi-iface` sections from this router. There are no predefined main/guest/IoT
+SSIDs. Creating, editing and removing profiles, timing settings and peer BSSID
+approvals all have LuCI controls; editing a configuration file is optional.
+Wireless SSIDs and passwords themselves are configured in LuCI's standard
+**Network → Wireless** page.
+
+The runtime interface, MLO mode and link count are inferred from netifd's actual
+wireless status. Enabling requires an active AP with a consistent, supported
+mapping; an inactive SSID may be saved as a disabled profile. No guessed
+interface names are written. Two enabled profiles cannot claim the same SSID
+section or runtime control interface. Both the local check interval (30–300
+seconds) and peer expiry (180–1800 seconds, at least three intervals) are
+validated on the server as well as in the form.
+
+Each profile has a stable ID shared by nodes participating in the same ESS.
+Choose that ID when creating it; it is unchanged by later SSID edits. IDs are
+case-sensitive ASCII tokens starting with a letter, followed by letters,
+digits or underscores, up to 48 characters. At most seventeen profiles are
+supported. Each enabled profile has an independent worker. Removing a profile
+stops its worker; peer BSSID approvals for that ID remain inactive and can be
+reused if the same ID is added later.
+
+Advanced consumers can generate typed `config roaming` sections in
+`/etc/config/wrtmesh`, declaring the wireless `section`, `iface`, `mlo` (`0` or
+`1`), `max_links` (`1`–`3`), `enabled`, `interval` and `ttl`. Explicit interface
+names must be safe Linux interface names of at most 15 bytes. A single-link
+profile declares one link. Collection verifies the exact configured control
+socket, SSID, BSSID and actual radio link ID. MLO link numbering need not start
+at zero. Historical interface defaults are accepted only for migrated profiles
+that omit both MLO metadata fields; LuCI writes explicit runtime metadata.
+
+The package reads the selected wireless section's actual SSID. It does not
+create wireless sections, change their security, configure VLANs, enable FT or
+steer/kick clients. Configure these through the standard wireless/network pages.
+Peer addresses, bridge MACs and approved per-link BSSIDs belong to local
+configuration and are never predefined in the package.
+
 ## Behavior
-
-Profiles are read from typed `config roaming` sections, with at most seventeen
-profiles and a separate worker per enabled ESS. The installed configuration is
-empty. A consumer may generate profiles such as the examples below:
-
-| Profile | Wireless UCI section | Control interface | Maximum links |
-| --- | --- | --- | --- |
-| main | ssid_main | ap-mld0 | 3 |
-| guest | ssid_guest | ap-mld1 | 2 |
-| iot | ssid_iot | ap-iot | 1 |
-
-Each profile declares `iface`, `mlo` (`0` or `1`) and `max_links` (`1`–`3`).
-A single-link profile must declare `max_links '1'`. User IDs are case-sensitive
-ASCII tokens starting with a letter, followed by letters, digits or underscores,
-with a maximum length of 48. MLO interface names are bounded `ap-mld0` through
-`ap-mld15`; single-link interfaces must be safe Linux interface names, at most
-15 bytes. Collection binds its exact control socket, SSID, BSSID and real radio
-link ID. A 5+6GHz MLO uses link IDs 1 and 2; numbering need not start at zero.
-
-The package retains strict historical metadata only for old `main`, `battalion`,
-`guest` and `iot` configurations that omit **both** `mlo` and `max_links`. Supplying
-only one is rejected. This preserves package upgrades on the old AP layout while
-allowing explicit metadata to use the new layout. New custom IDs require both.
-
-The package reads each configured wireless section's actual SSID. It does not
-create those sections, change their security, enable k/v, allocate addresses,
-configure VLANs, enable FT or steer/kick clients. The AP deployment profile
-must provide those settings separately. The example IoT profile is a single-link BSS. Node addresses, bridge MACs and permitted per-link peer BSSIDs come
-from device provisioning, not from this package's source.
 
 The default schedule is a 30-second local check and heartbeat, a 60-second
 peer fetch, and a 300-second strict collection/actual-table audit. Peer data
@@ -127,9 +139,11 @@ peer. The original single-peer configuration remains compatible.
 
 Public neighbor JSON remains version 1, containing no local interface name or
 profile metadata. Therefore a peer's interface rename does not break exchange
-with existing C7 publishers. The main endpoint remains `/xr-roaming/own.json`;
-other endpoints are `/xr-roaming/PROFILE/own.json`. The same ESS must use the
-same stable profile ID on every AP; no speculative URL discovery is performed.
+with existing v1 publishers. The primary endpoint is `/wrtmesh/own.json`;
+other endpoints are `/wrtmesh/PROFILE/own.json`. The same ESS must use the
+same stable profile ID on every AP. A 404 response permits one fallback to
+the predecessor `/xr-roaming/` path; a validated legacy choice is cached.
+Timeouts, denied requests and invalid payloads do not trigger fallback.
 Peer link counts may differ from the local AP's count, bounded to three and to
 the configured peer BSSID allowlist. HTTP bodies retain their stricter 16 KiB
 limit; hostapd control replies remain bounded to 64 KiB.
@@ -143,19 +157,18 @@ such as usteer or DAWN, against the same hostapd objects.
 ## Configuration and lifecycle
 
 No ESS profile or peer ships predefined. The procd observer runs independently
-of the ESS workers. Set up the local ESS profile, verify its wireless section
-and interface mapping, then enable it. Wi-Fi passwords belong to the wireless
-deployment configuration.
+of the ESS workers. Set up local profiles and peers in **Network → Mesh**.
+Configuration writes use authenticated local RPC methods with separate read
+and write ACLs. The plaintext peer endpoint has no configuration operations.
 
 Legacy roaming uses a DHCP address on `lan`/`br-lan.1`. With LuCI-managed peers,
 the roaming worker also accepts a static address on `br-lan` or `br-lan.1` and
 checks that the target is on the same subnet. The Mesh observer uses the primary
-private IPv4 address of the management LAN. See
-[XR1710G maintenance allocation](https://github.com/DictXiong/ImmortalWrt-for-Gemtek-brightspeed/blob/dicttech/xr1710g-ap/docs/dicttech-maintenance.md).
+private IPv4 address of the management LAN.
 
 ```sh
-/etc/init.d/xr_roaming reload
-/usr/lib/xr-roaming/helper.sh status main
+/etc/init.d/wrtmesh reload
+/usr/lib/wrtmesh/helper.sh status main
 ```
 
 Use another configured profile ID for other ESSes. `helper.sh profiles` lists
@@ -171,8 +184,25 @@ rather than replacing modules beneath a running worker. Offline rootfs
 installation respects `IPKG_INSTROOT` and performs no target service calls.
 Package installation does not run `uci-defaults` or commit unrelated UCI edits.
 
-`/etc/config/xr_roaming` and `/etc/config/xr_mesh` are conffiles. Installed code, the init script and
-the `/www/xr-roaming` symlink are package-owned. The symlink targets the RAM
+Earlier configurations named `/etc/config/xr_roaming` and `/etc/config/xr_mesh`
+are migrated automatically on installation or first service start after a
+firmware upgrade. Raw originals are saved with mode 0600 under
+`/etc/wrtmesh/migration/roaming.uci` and `peers.uci`; APK `.apk-save` copies have
+separate backups. New populated canonical files take precedence. Migration is
+idempotent, stages both copies and refuses symlinks or conflicting backups.
+The old active files are removed only after their contents have been preserved.
+The canonical UCI files survive sysupgrade when settings are retained; the
+extra migration archive is not automatically included in sysupgrade backups.
+
+All active configuration, service, library, RPC, frontend and discovery names
+use `wrtmesh`. The package keeps only the old read-only HTTP paths and discovery
+recognition needed to communicate with earlier nodes, plus the predecessor
+package `PROVIDES` entry needed for APK replacement. There is no old local
+configuration, service or RPC alias. External configuration generators must
+use the new paths and service name when deploying this version.
+
+`/etc/config/wrtmesh` and `/etc/config/wrtmesh_peers` are conffiles. Installed code, the init script and
+the `/www/wrtmesh` symlink are package-owned. The symlink targets the RAM
 publication directory; private state, published JSON and locks live in `/tmp`
 and must not be retained across upgrades.
 Historical profile state paths are retained. Other IDs use a `profile-ID`
@@ -182,7 +212,7 @@ the public URL or ESS identity.
 
 ## Firmware upgrades
 
-Do not copy an entire old `/etc` or `/usr/lib/xr-roaming` over a new image.
+Do not copy an entire old `/etc` or `/usr/lib/wrtmesh` over a new image.
 Firmware upgrades should preserve configuration and device SSH host keys,
 while obtaining runtime code from the new image's package set.
 
@@ -195,9 +225,10 @@ Run the tests as root on Linux, in an isolated build/test environment with
 Python 3, jq and the usual POSIX utilities:
 
 ```sh
-python3 tests/check-xr-roaming-package.py
-python3 tests/test-xr-roaming.py
-python3 tests/test-xr-mesh.py --c7-rootfs PATH
+python3 tests/check-wrtmesh-package.py
+python3 tests/test-roaming.py
+python3 tests/test-mesh.py --c7-rootfs PATH
+python3 tests/test-configuration.py --c7-rootfs PATH
 ```
 
 The first command checks unconfigured defaults and lifecycle/lock handling without

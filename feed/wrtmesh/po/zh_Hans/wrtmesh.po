@@ -15,6 +15,9 @@ msgstr "%d 秒前"
 msgid "A BSSID is already used by this device or another peer on this profile."
 msgstr "本机或其他 Mesh 节点已在此漫游配置中使用该 BSSID。"
 
+msgid "A local profile selects an SSID on this AP. Use the same stable profile ID on the other APs for the same network."
+msgstr "本地配置选择本机的一个 SSID。同一网络在其他 AP 上应使用相同的固定配置标识。"
+
 msgid "A node reached its station reporting limit."
 msgstr "有节点已达到站点上报上限。"
 
@@ -36,11 +39,20 @@ msgstr "AP 发送速率"
 msgid "Add Mesh peer"
 msgstr "添加节点"
 
+msgid "Add local roaming profile"
+msgstr "添加本地漫游配置"
+
 msgid "Add the peer on both devices to exchange station and topology snapshots. Peer changes apply to this device."
 msgstr "在两台设备上互相添加节点，即可交换站点和拓扑快照。这里的设置仅应用于本机。"
 
 msgid "Also reported by %s"
 msgstr "%s 也报告了该客户端"
+
+msgid "Another configuration edit is in progress. Apply or discard the pending wrtmesh changes before retrying."
+msgstr "还有 wrtmesh 配置编辑尚未完成。请先应用或放弃待处理的更改，再重试。"
+
+msgid "Assistance status"
+msgstr "辅助状态"
 
 msgid "Associated Stations"
 msgstr "已连接站点"
@@ -51,8 +63,8 @@ msgstr "已连接 %d 个站点"
 msgid "At least %d associated stations"
 msgstr "至少连接了 %d 个站点"
 
-msgid "BSSIDs for %s (optional)"
-msgstr "%s 的 BSSID（可选）"
+msgid "BSSID approval profiles"
+msgstr "BSSID 授权配置"
 
 msgid "Band / MLO link"
 msgstr "频段／MLO 链路"
@@ -69,6 +81,15 @@ msgstr "网桥与网口详情"
 msgid "Cancel"
 msgstr "取消"
 
+msgid "Check / expiry"
+msgstr "检查／过期"
+
+msgid "Check interval (seconds)"
+msgstr "检查间隔（秒）"
+
+msgid "Choose whether roaming assistance is enabled for this local SSID."
+msgstr "请选择是否为此本地 SSID 启用漫游辅助。"
+
 msgid "Client details"
 msgstr "客户端详情"
 
@@ -81,8 +102,17 @@ msgstr "其他节点也报告了这些客户端"
 msgid "Close"
 msgstr "关闭"
 
-msgid "Could not save the local peer settings."
-msgstr "无法保存本机的节点设置。"
+msgid "Could not save the local Mesh settings."
+msgstr "无法保存本机的 Mesh 设置。"
+
+msgid "Detected MLO with up to %d links."
+msgstr "已识别 MLO，最多 %d 条链路。"
+
+msgid "Detected a single-link AP."
+msgstr "已识别单链路 AP。"
+
+msgid "Disable assistance"
+msgstr "停用辅助"
 
 msgid "Discover peers"
 msgstr "发现节点"
@@ -96,6 +126,15 @@ msgstr "显示名称"
 msgid "Edit"
 msgstr "编辑"
 
+msgid "Edit local roaming profile"
+msgstr "编辑本地漫游配置"
+
+msgid "Enable assistance"
+msgstr "启用辅助"
+
+msgid "Enable roaming assistance for this local SSID"
+msgstr "为此本地 SSID 启用漫游辅助"
+
 msgid "Enter a unicast bridge MAC and a peer IPv4 address on the LAN subnet."
 msgstr "请输入单播网桥 MAC 地址和与管理 LAN 同网段的节点 IPv4 地址。"
 
@@ -104,6 +143,12 @@ msgstr "每项漫游配置最多可输入三个不同的单播 BSSID。"
 
 msgid "Ethernet"
 msgstr "以太网"
+
+msgid "Existing remote BSSID approvals are retained for this profile ID."
+msgstr "此配置标识已有的远端 BSSID 授权将被保留。"
+
+msgid "Expiry must be at least three times the check interval."
+msgstr "过期时间须至少为检查间隔的三倍。"
 
 msgid "Frequency"
 msgstr "频率"
@@ -123,11 +168,26 @@ msgstr "IPv4 地址"
 msgid "Link %d"
 msgstr "链路 %d"
 
+msgid "Local AP SSID"
+msgstr "本地 AP SSID"
+
+msgid "Local SSID"
+msgstr "本地 SSID"
+
+msgid "Local roaming profiles"
+msgstr "本地漫游配置"
+
+msgid "Local roaming settings are unavailable."
+msgstr "暂时无法读取本地漫游设置。"
+
 msgid "MAC address"
 msgstr "MAC 地址"
 
 msgid "MLD address"
 msgstr "MLD 地址"
+
+msgid "MLO, up to %d links"
+msgstr "MLO，最多 %d 条链路"
 
 msgid "Mbit/s"
 msgstr "Mbit/s"
@@ -156,6 +216,9 @@ msgstr "名称"
 msgid "Negotiated rate (AP RX / TX)"
 msgstr "协商速率（AP 收／发）"
 
+msgid "Neighbor report expiry (seconds)"
+msgstr "邻居报告过期时间（秒）"
+
 msgid "Network"
 msgstr "网络"
 
@@ -164,6 +227,9 @@ msgstr "暂无已连接站点。"
 
 msgid "No fresh snapshot"
 msgstr "暂无近期快照"
+
+msgid "No local roaming profiles configured."
+msgstr "尚未配置本地漫游。"
 
 msgid "No new peers discovered on the management LAN."
 msgstr "管理 LAN 上未发现新节点。"
@@ -210,14 +276,41 @@ msgstr "对端无线客户端"
 msgid "Permission to view Mesh status was denied."
 msgstr "没有权限查看 Mesh 状态。"
 
+msgid "Permission to view local roaming settings was denied."
+msgstr "没有权限查看本地漫游设置。"
+
 msgid "Port unknown"
 msgstr "网口未知"
+
+msgid "Profile ID"
+msgstr "配置标识"
 
 msgid "RX Rate"
 msgstr "接收速率"
 
+msgid "Radio information unavailable"
+msgstr "无线信息暂不可用"
+
+msgid "Radio links"
+msgstr "无线链路"
+
+msgid "Remote BSSID approvals"
+msgstr "远端 BSSID 授权"
+
+msgid "Remote BSSIDs for %s (optional)"
+msgstr "%s 的远端 BSSID（可选）"
+
+msgid "Remove local profile"
+msgstr "移除本地配置"
+
+msgid "Remove local roaming profile"
+msgstr "移除本地漫游配置"
+
 msgid "Remove peer"
 msgstr "移除节点"
+
+msgid "Remove this local roaming profile?"
+msgstr "移除此本地漫游配置？"
 
 msgid "Remove this peer from this device?"
 msgstr "从本机移除此节点？"
@@ -225,11 +318,32 @@ msgstr "从本机移除此节点？"
 msgid "Review"
 msgstr "核对"
 
-msgid "Roaming profiles"
-msgstr "漫游配置"
+msgid "Roaming assistance disabled"
+msgstr "漫游辅助已停用"
+
+msgid "Roaming assistance enabled"
+msgstr "漫游辅助已启用"
+
+msgid "SSID unavailable"
+msgstr "SSID 暂不可用"
+
+msgid "Save local profile"
+msgstr "保存本地配置"
 
 msgid "Save peer"
 msgstr "保存节点"
+
+msgid "Select a local AP SSID"
+msgstr "选择本地 AP SSID"
+
+msgid "Select a local AP SSID."
+msgstr "请选择本地 AP SSID。"
+
+msgid "Select the local SSIDs that publish and use roaming neighbor reports. Approve remote BSSIDs separately in each peer."
+msgstr "选择需要发布和使用漫游邻居报告的本地 SSID，再到各个对端节点中单独授权远端 BSSID。"
+
+msgid "Settings were saved, but the roaming service could not reload. Check the service status."
+msgstr "设置已保存，但漫游服务未能重新加载。请检查服务状态。"
 
 msgid "Shared Ethernet"
 msgstr "共享以太网"
@@ -240,14 +354,23 @@ msgstr "共用网关"
 msgid "Signal"
 msgstr "信号"
 
+msgid "Single link"
+msgstr "单链路"
+
 msgid "Snapshot updated %s"
 msgstr "快照更新于 %s"
+
+msgid "Stable profile ID"
+msgstr "固定配置标识"
 
 msgid "Station count unavailable"
 msgstr "站点数未知"
 
 msgid "TX Rate"
 msgstr "发送速率"
+
+msgid "The AP interface changed. Refresh the page and select the local SSID again."
+msgstr "AP 接口已改变。请刷新页面并重新选择本地 SSID。"
 
 msgid "The mDNS discovery service is unavailable."
 msgstr "mDNS 发现服务不可用。"
@@ -258,6 +381,18 @@ msgstr "管理 LAN 不可用。"
 msgid "The peer did not return a valid Mesh identity. You can enter its details manually."
 msgstr "该节点未返回有效的 Mesh 身份信息，可手动填写。"
 
+msgid "The selected AP is unavailable. Save the profile disabled or bring the AP online."
+msgstr "所选 AP 暂不可用。可先保存为停用状态，或使 AP 恢复在线后再启用。"
+
+msgid "The selected SSID has an ambiguous AP interface. Check its wireless configuration."
+msgstr "无法确定所选 SSID 对应的唯一 AP 接口。请检查无线配置。"
+
+msgid "This AP interface is not supported for roaming assistance."
+msgstr "此 AP 接口不受漫游辅助支持。"
+
+msgid "This AP is currently unavailable. Disabled profile settings can still be saved."
+msgstr "此 AP 当前不可用，仍可保存为停用状态。"
+
 msgid "This address is already used by another peer."
 msgstr "此地址已被其他节点使用。"
 
@@ -266,6 +401,21 @@ msgstr "本机"
 
 msgid "This device already has 15 peers."
 msgstr "本机已添加 15 个节点。"
+
+msgid "This device already has 17 local roaming profiles."
+msgstr "本机已配置 17 个本地漫游。"
+
+msgid "This local SSID is already selected by another roaming profile."
+msgstr "另一个漫游配置已选择此本地 SSID。"
+
+msgid "This local roaming profile no longer exists. Refresh the page."
+msgstr "此本地漫游配置已不存在。请刷新页面。"
+
+msgid "Use a check interval from 30 to 300 seconds and an expiry from 180 to 1800 seconds, at least three times the interval."
+msgstr "检查间隔为 30 至 300 秒，过期时间为 180 至 1800 秒，且须至少为检查间隔的三倍。"
+
+msgid "Use a profile ID starting with a letter, followed by up to 47 letters, digits or underscores."
+msgstr "配置标识须以字母开头，后接最多 47 个字母、数字或下划线。"
 
 msgid "Verify the bridge MAC and BSSIDs before saving this discovered peer. Discovery is unauthenticated."
 msgstr "发现过程未验证节点身份。保存前请核对网桥 MAC 地址和 BSSID。"

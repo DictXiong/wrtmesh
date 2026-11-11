@@ -4,7 +4,7 @@
 import * as fs from 'fs';
 import * as ubus from 'ubus';
 import * as rtnl from 'rtnl';
-import * as mesh from '/usr/lib/xr-roaming/mesh.uc';
+import * as mesh from '/usr/lib/wrtmesh/mesh.uc';
 
 let bus = ubus.connect(null, 1);
 let config = mesh.cursor();

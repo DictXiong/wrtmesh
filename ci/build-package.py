@@ -57,14 +57,18 @@ def main():
     sdk = work / 'sdk'
     sdk.mkdir()
     run(['tar', '--zstd', '-xf', archive, '-C', sdk, '--strip-components=1'])
-    (sdk / 'feeds.conf').write_text('src-git base ' + PIN['base_feed'] + '\n'
+    (sdk / 'feeds.conf').write_text('src-git --root=package base ' + PIN['base_feed'] + '\n'
                                    'src-git packages ' + PIN['packages_feed'] + '\n'
                                    'src-git luci ' + PIN['luci_feed'] + '\n'
                                    'src-link wrtmesh ' + str(ROOT) + '\n')
     run(['./scripts/feeds', 'update', 'base', 'packages', 'luci', 'wrtmesh'], cwd=sdk)
     run(['./scripts/feeds', 'install', 'wrtmesh'], cwd=sdk)
-    with (sdk / '.config').open('a') as config:
-        config.write('\nCONFIG_PACKAGE_wrtmesh=m\nCONFIG_SIGNED_PACKAGES=y\n')
+    # SDK defaults enable ALL packages, including every hostapd/TLS variant.
+    # Start a minimal config; the SDK supplies its fixed target/toolchain.
+    (sdk / '.config').write_text(
+        '# CONFIG_ALL is not set\n# CONFIG_ALL_NONSHARED is not set\n'
+        '# CONFIG_ALL_KMODS is not set\nCONFIG_PACKAGE_wrtmesh=m\n'
+        'CONFIG_PACKAGE_wpad-basic-mbedtls=m\nCONFIG_SIGNED_PACKAGES=y\n')
     run(['make', 'defconfig'], cwd=sdk)
     # Each build has its own signing identity. Only its public key is exported;
     # release provenance authenticates both the package and that exact key.
@@ -102,7 +106,7 @@ def main():
         'source_revision': revision, 'openwrt_release': PIN['release'],
         'sdk': PIN, 'architecture': 'noarch', 'package': package.name,
         'package_sha256': sha(package), 'signing_key': public.name,
-        'compatibility': 'APK 3. Roaming requires the C7 hostapd interface. LuCI Overview requires the supplied feed patch.',
+        'compatibility': 'APK 3. Roaming requires a supported hostapd interface. LuCI Mesh and Overview modules are owned by the package.',
     }
     (output / 'release.json').write_text(json.dumps(metadata, indent=2) + '\n')
     (output / 'SHA256SUMS').write_text(''.join(sha(p) + '  ' + p.name + '\n'

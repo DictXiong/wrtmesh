@@ -13,7 +13,7 @@ class Dynamic(Cache):
  def __init__(self,extra=True,profile='main',shell=None):
   self.meta=None;super().__init__('main',shell);self.profile=profile
   self.meta={'main':{'iface':'ap-mld0','bands':[0,1,2]},'guest':{'iface':'ap-mld1','bands':[0,1]},'iot':{'iface':'ap-iot','bands':[0]}}
-  if extra:self.meta.update({'office':{'iface':'ap-mld2','bands':[1,2]},'sensor':{'iface':'ap-xf00abc12','bands':[1]}})
+  if extra:self.meta.update({'office':{'iface':'mesh-office','bands':[1,2]},'sensor':{'iface':'ap-xf00abc12','bands':[1]}})
   self.profiles={};self.wireless={};self.radio={};self.objects={};self.types={};self.peers={}
   for old in self.ctrl.iterdir():old.unlink()
   for index,(name,definition) in enumerate(self.meta.items()):
@@ -41,13 +41,13 @@ class Dynamic(Cache):
 a=sys.argv;k=a[-1];v=json.load(open({str(self.config)!r}))
 with open({str(self.uci_log)!r},"a")as f:f.write(k+"\\n")
 if "show" in a:
- if k=="xr_roaming":
-  for name in v["profiles"]:print("xr_roaming."+name+"=roaming")
-  for name in v["peers"]:print("xr_roaming."+name+"=peer")
+ if k=="wrtmesh":
+  for name in v["profiles"]:print("wrtmesh."+name+"=roaming")
+  for name in v["peers"]:print("wrtmesh."+name+"=peer")
  else:print("network.@device[0]=device")
 elif k=="network.@device[0].name":print("br-lan")
 elif k=="network.@device[0].macaddr":print("02:00:00:00:00:02")
-elif k.startswith("xr_roaming."):
+elif k.startswith("wrtmesh."):
  p=k.split(".");name=p[1]
  if len(p)==2:print("roaming"if name in v["profiles"]else"peer"if name in v["peers"]else"")
  else:print((v["profiles"].get(name)or v["peers"].get(name,{{}})).get(p[2],""))
@@ -57,8 +57,8 @@ else:sys.exit(1)
 ''')
   (self.bin/'curl').write_text('#!'+py+'\n'+f'''import json,sys,pathlib,urllib.parse,shutil
 a=sys.argv;u=urllib.parse.urlsplit(a[-1]);assert u.scheme=="http"and u.hostname in ["10.24.0.1","10.24.0.10","10.24.0.11"]
-profile="main"if u.path=="/xr-roaming/own.json"else u.path.split("/")[2]
-assert u.path==("/xr-roaming/own.json"if profile=="main"else"/xr-roaming/"+profile+"/own.json")
+profile="main"if u.path=="/wrtmesh/own.json"else u.path.split("/")[2]
+assert u.path==("/wrtmesh/own.json"if profile=="main"else"/wrtmesh/"+profile+"/own.json")
 suffix=""if u.hostname=="10.24.0.1"else"."+("peer_a"if u.hostname.endswith(".10")else"peer_b")
 p=pathlib.Path({str(self.http)!r})/(profile+suffix+".json")
 with open({str(self.curl_log)!r},"a")as f:f.write(profile+suffix+"\\n")
@@ -102,7 +102,7 @@ def multiple_links_and_slo():
   for profile in m.meta:m.call(profile=profile)
   assert len(m.table('office'))==2 and len(m.table('sensor'))==1
   links=json.loads((m.state_path('office')/'links.json').read_text());assert [x['link_id']for x in links]==[1,2]
-  assert all(x['base']=='ap-mld2'for x in links)
+  assert all(x['base']=='mesh-office'for x in links)
   assert json.loads(m.pub('office').read_text())['version']==1
   # A peer can have a third radio absent on this AP; metadata carries no iface.
   payload=json.loads((m.http/'office.json').read_text());extra=json.loads((m.http/'main.json').read_text())['reports'][0]
@@ -116,7 +116,7 @@ def metadata_rejection():
  m=Dynamic()
  try:
   saved=dict(m.profiles['office'])
-  for change in [{'mlo':''},{'max_links':''},{'mlo':'true'},{'max_links':'4'},{'max_links':'02'},{'mlo':'0','max_links':'2'},{'iface':'ap-mld16'},{'iface':'../../other'},{'iface':'ap-mld123456789012'}]:
+  for change in [{'mlo':''},{'max_links':''},{'mlo':'true'},{'max_links':'4'},{'max_links':'02'},{'mlo':'0','max_links':'2'},{'iface':'../../other'},{'iface':'ap-mld123456789012'}]:
    m.profiles['office']={**saved,**change};m.save_multi();m.call('preflight','office',False)
   m.profiles['office']=saved;m.save_multi();m.call('preflight','office')
   main=dict(m.profiles['main'])
@@ -149,7 +149,7 @@ def dynamic_procd():
  m=Dynamic()
  try:
   m.profiles['sensor']['enabled']='0';m.save_multi()
-  init=m.p/'dynamic-init';init.write_text((S/'init.sh').read_text().replace('/usr/lib/xr-roaming/helper.sh',str(m.helper)))
+  init=m.p/'dynamic-init';init.write_text((S/'init.sh').read_text().replace('/usr/lib/wrtmesh/migrate-config.sh', 'true').replace('/usr/lib/wrtmesh/helper.sh',str(m.helper)))
   output=m.p/'instances'
   script='''uci() { printf '1\\n'; }
 procd_open_instance() { printf 'OPEN %s\\n' "$1" >> "$OUT"; }
@@ -201,7 +201,7 @@ def dynamic_fleet_expiry():
 def mesh_runtime_peer_overrides():
  m = Dynamic(profile='sensor', shell=C7 if ROOT else SHELL)
  try:
-  mesh_config = m.cfgdir / 'xr_mesh'
+  mesh_config = m.cfgdir / 'wrtmesh_peers'
   mesh_config.write_text('config peer p_fixture\n')
   overlay = m.p / 'overlay.json'
   fake_ucode = m.bin / 'ucode'
@@ -233,5 +233,37 @@ def mesh_runtime_peer_overrides():
  finally:
   m.close()
 
-for name,fn in [('dynamic_three_presets_without_extras',default_only),('dynamic_MLO_5_6_and_single_band',multiple_links_and_slo),('dynamic_metadata_rejects_invalid_inputs',metadata_rejection),('dynamic_profile_bounds_and_private_namespace',list_bounds_and_namespace),('dynamic_procd_instances_from_typed_config',dynamic_procd),('dynamic_cached_MLO_and_v1_peer_expiry',dynamic_cache_and_expiry),('dynamic_SLO_fleet_independent_expiry',dynamic_fleet_expiry),('mesh_runtime_peer_overrides',mesh_runtime_peer_overrides)]:check(name,fn)
+def legacy_http_path():
+ m=Dynamic(profile='sensor',shell=C7 if ROOT else SHELL)
+ try:
+  mock=m.bin/'curl';original=mock.read_text();mode=m.p/'http-mode';requests=m.p/'http-paths'
+  mode.write_text('legacy')
+  # Preserve the actual v1 payload fixture; only the endpoint selection changes.
+  injection=f"""
+mode=pathlib.Path({str(mode)!r}).read_text()
+with open({str(requests)!r},'a') as log:log.write(u.path+'\\n')
+headers=pathlib.Path(a[a.index('--dump-header')+1])
+if mode in ['forbidden','timeout']:
+ if mode=='forbidden':headers.write_text('HTTP/1.1 403 Forbidden\\r\\n\\r\\n')
+ sys.exit(22 if mode=='forbidden' else 28)
+if mode=='legacy' and u.path.startswith('/wrtmesh/'):
+ headers.write_text('HTTP/1.1 404 Not Found\\r\\n\\r\\n');sys.exit(22)
+if mode=='invalid':
+ pathlib.Path(a[a.index('--output')+1]).write_text('{{}}');sys.exit(0)
+u=u._replace(path=u.path.replace('/xr-roaming/','/wrtmesh/'))
+"""
+  original=original.replace('profile="main"',injection+'\nprofile="main"',1);mock.write_text(original)
+  m.call();endpoint=m.state_path('sensor')/'endpoint'
+  assert requests.read_text().splitlines()==['/wrtmesh/sensor/own.json','/xr-roaming/sensor/own.json']
+  assert endpoint.read_text().strip()=='xr-roaming' and len(m.table('sensor'))==1
+  requests.write_text('');m.call()
+  assert requests.read_text().splitlines()==['/xr-roaming/sensor/own.json'],'legacy endpoint must be cached'
+  for failure in ['forbidden','timeout','invalid']:
+   endpoint.unlink(missing_ok=True);requests.write_text('');mode.write_text(failure);m.call()
+   assert requests.read_text().splitlines()==['/wrtmesh/sensor/own.json'],'only 404 can trigger fallback'
+   assert not endpoint.exists(),'invalid responses must not cache endpoint choice'
+  return {'v1_legacy_fallback_404_only':True,'validated_endpoint_cached':True,'no_retry_denied_timeout_invalid':True,'target_C7':bool(ROOT)}
+ finally:m.close()
+
+for name,fn in [('dynamic_three_presets_without_extras',default_only),('dynamic_MLO_5_6_and_single_band',multiple_links_and_slo),('dynamic_metadata_rejects_invalid_inputs',metadata_rejection),('dynamic_profile_bounds_and_private_namespace',list_bounds_and_namespace),('dynamic_procd_instances_from_typed_config',dynamic_procd),('dynamic_cached_MLO_and_v1_peer_expiry',dynamic_cache_and_expiry),('dynamic_SLO_fleet_independent_expiry',dynamic_fleet_expiry),('mesh_runtime_peer_overrides',mesh_runtime_peer_overrides),('v1_legacy_HTTP_path_compatibility',legacy_http_path)]:check(name,fn)
 (R/'dynamic-tests-result.json').write_text(json.dumps({'passed':True,'results':results},indent=2)+'\n')

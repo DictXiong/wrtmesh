@@ -31,7 +31,7 @@ with open({str(self.uci_log)!r},"a")as f:f.write(k+"\\n")
 if "show"in a:print("network.@device[0]=device")
 elif k=="network.@device[0].name":print("br-lan")
 elif k=="network.@device[0].macaddr":print("02:00:00:00:00:02")
-elif k.startswith("xr_roaming."):
+elif k.startswith("wrtmesh."):
  p=k.split(".");name=p[1]
  if len(p)==2:print("peer"if name in v["peers"]else"roaming")
  else:print((v["peers"].get(name)or v["profiles"].get(name,{{}})).get(p[2],""))
@@ -41,7 +41,7 @@ else:sys.exit(1)
 ''')
   (self.bin/'curl').write_text('#!'+py+'\n'+f'''import sys,json,pathlib,shutil,urllib.parse
 a=sys.argv;u=urllib.parse.urlsplit(a[-1]);mapping={{{','.join(repr(v['address'])+':'+repr(k)for k,v in self.peers.items())}}}
-assert u.scheme=="http"and u.hostname in mapping and u.path=="/xr-roaming/iot/own.json"
+assert u.scheme=="http"and u.hostname in mapping and u.path=="/wrtmesh/iot/own.json"
 with open({str(self.curl_log)!r},"a")as f:f.write(mapping[u.hostname]+"\\n")
 p=pathlib.Path({str(self.http)!r})/(mapping[u.hostname]+".json")
 if not p.exists():sys.exit(22)

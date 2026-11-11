@@ -59,7 +59,7 @@ with open({str(self.uci_log)!r},"a")as f:f.write(k+"\\n")
 if "show"in a:print("network.@device[0]=device")
 elif k=="network.@device[0].name":print("br-lan")
 elif k=="network.@device[0].macaddr":print("02:00:00:00:00:02")
-elif k.startswith("xr_roaming."):
+elif k.startswith("wrtmesh."):
  parts=k.split(".");profile=parts[1];print("roaming"if len(parts)==2 else v["profiles"].get(profile,{{}}).get(parts[2],""))
 elif k.startswith("wireless."):
  parts=k.split(".");section=parts[1];print(v["types"].get(section,"wifi-iface")if len(parts)==2 else v["wireless"].get(section,""))
@@ -68,8 +68,8 @@ else:sys.exit(1)
   script('curl',f'''import sys,pathlib,json,urllib.parse,shutil
 a=sys.argv;assert a[1]=="--disable"and"--interface"in a
 u=urllib.parse.urlsplit(a[-1]);assert u.hostname=="10.24.0.1"and u.scheme=="http"
-profile="main"if u.path=="/xr-roaming/own.json"else u.path.split("/")[2]
-assert profile in {list(profiles)!r}and u.path==("/xr-roaming/own.json"if profile=="main"else"/xr-roaming/"+profile+"/own.json")
+profile="main"if u.path=="/wrtmesh/own.json"else u.path.split("/")[2]
+assert profile in {list(profiles)!r}and u.path==("/wrtmesh/own.json"if profile=="main"else"/wrtmesh/"+profile+"/own.json")
 with open({str(self.curl_log)!r},"a")as f:f.write(json.dumps({{"profile":profile,"url":a[-1],"source":a[a.index("--interface")+1]}})+"\\n")
 p=pathlib.Path({str(self.http)!r})/(profile+".json")
 if not p.exists():sys.exit(22)
@@ -185,7 +185,7 @@ try:
  def procd_profiles():
   output=m.p/'procd-instances';helper=m.p/'inert-preflight'
   helper.write_text('#!/bin/sh\n[ "$1" = profiles ] || exit 1\nprintf "%s\\n" main battalion guest iot\n');helper.chmod(0o700)
-  init=(S/'init.sh').read_text().replace('/usr/lib/xr-roaming/helper.sh',str(helper))
+  init=(S/'init.sh').read_text().replace('/usr/lib/wrtmesh/migrate-config.sh', 'true').replace('/usr/lib/wrtmesh/helper.sh',str(helper))
   initpath=m.p/'init-fixture';initpath.write_text(init)
   script='''uci() { printf '1\\n'; }
 procd_open_instance() { printf 'OPEN %s\\n' "$1" >> "$PROCD_FIXTURE"; }

@@ -22,7 +22,7 @@ def test(root, qemu):
     link2 = {'link_id': 2, 'address': '02:00:00:00:00:76', 'bssid': '02:00:00:00:01:76'}
     bssid = '02:00:00:00:01:21'
 
-    with tempfile.TemporaryDirectory(prefix='xr-mesh-test-') as temp:
+    with tempfile.TemporaryDirectory(prefix='wrtmesh-test-') as temp:
         stage = Path(temp)
         config = stage / 'config'
         delta = stage / 'delta'
@@ -31,6 +31,9 @@ def test(root, qemu):
             d.mkdir()
         clock = stage / 'uptime'
         clock.write_text('100.00 0.00\n')
+        service = stage / 'service'
+        service.write_text('#!/bin/sh\n[ "$1" = reload ]\n')
+        service.chmod(0o700)
         # Replace curl with a local fixture that honors the relevant curl options
         # and writes its header/body files. The fetch classifier runs unchanged.
         curl = stage / 'curl'
@@ -41,11 +44,17 @@ from urllib.parse import urlsplit
 args = sys.argv[1:]
 url = urlsplit(args[-1])
 assert url.scheme == 'http' and url.hostname in ('192.168.1.21', '192.168.1.22')
-assert url.path == '/cgi-bin/xr-mesh' and url.query in ('', 'identity=1')
-fixture = Path({str(stage)!r}) / (url.hostname + ('-identity' if url.query else '') + '.json')
+assert url.path in ('/cgi-bin/wrtmesh', '/cgi-bin/xr-mesh') and url.query in ('', 'identity=1')
+with (Path({str(stage)!r}) / 'http-calls.jsonl').open('a') as stream:
+    stream.write(json.dumps({{'host': url.hostname, 'path': url.path, 'query': url.query}}) + '\\n')
+fixture = Path({str(stage)!r}) / (url.hostname + ('-identity' if url.query else '') +
+    ('-legacy' if url.path == '/cgi-bin/xr-mesh' else '') + '.json')
 if not fixture.exists():
-    sys.exit(7)
-response = json.loads(fixture.read_text())
+    response = {{'status': 404, 'data': None}} if url.path == '/cgi-bin/xr-mesh' else None
+    if response is None:
+        sys.exit(7)
+else:
+    response = json.loads(fixture.read_text())
 status = response['status']
 Path(args[args.index('--dump-header') + 1]).write_bytes(f'HTTP/1.1 {{status}} Fixture\\r\\n\\r\\n'.encode())
 if status != 200:
@@ -56,8 +65,8 @@ if len(payload) > int(args[args.index('--max-filesize') + 1]):
 Path(args[args.index('--output') + 1]).write_bytes(payload)
 """)
         curl.chmod(0o700)
-        (config / 'xr_mesh').write_text('# empty\n')
-        (config / 'xr_roaming').write_text(f"""
+        (config / 'wrtmesh_peers').write_text('# empty\n')
+        (config / 'wrtmesh').write_text(f"""
 config roaming 'main'
 	option enabled '1'
 	option peer '192.168.1.21'
@@ -66,10 +75,11 @@ config roaming 'main'
 """)
         (stage / 'mesh.uc').write_text(
             (source / 'mesh.uc').read_text()
-            .replace('/tmp/xr-roaming-private/mesh', str(state))
-            .replace('/tmp/xr-roaming-public/', str(stage / 'public') + '/')
+            .replace('/tmp/wrtmesh-private/mesh', str(state))
+            .replace('/tmp/wrtmesh-public/', str(stage / 'public') + '/')
             .replace('/usr/bin/curl', str(curl))
             .replace('/proc/uptime', str(clock))
+            .replace('/etc/init.d/wrtmesh', str(service))
             .replace('return uci.cursor();', f"return uci.cursor('{config}', '{delta}');")
         )
         (stage / 'mesh-sample.uc').write_text(
@@ -77,17 +87,18 @@ config roaming 'main'
             .replace('/tmp/dhcp.leases', str(stage / 'dhcp.leases'))
         )
         (stage / 'dhcp.leases').write_text(f"0 {link2['address']} 192.168.1.43 example-client *\n")
-        for name in ('xrmesh.uc', 'xr-mesh.cgi'):
+        for name in ('wrtmesh.uc', 'wrtmesh.cgi'):
             shutil.copyfile(source / name, stage / name)
-        for name in ('mesh-sample.uc', 'xrmesh.uc', 'xr-mesh.cgi'):
+        for name in ('mesh-sample.uc', 'wrtmesh.uc', 'wrtmesh.cgi'):
             path = stage / name
             path.write_text(path.read_text()
-                            .replace('/usr/lib/xr-roaming/mesh.uc', str(stage / 'mesh.uc'))
+                            .replace('/usr/lib/wrtmesh/mesh.uc', str(stage / 'mesh.uc'))
                             .replace("from 'ubus'", f"from '{stage}/fixture-ubus.uc'")
                             .replace("from 'rtnl'", f"from '{stage}/fixture-rtnl.uc'")
+                            .replace('/var/lock/wrtmesh-config.lock', str(stage / 'config.lock'))
                             .replace('rtnl.const', 'rtnl.constants'))
         (stage / 'fixture-ubus.uc').write_text(f"""
-import {{ readfile }} from 'fs';
+import {{ readfile, writefile }} from 'fs';
 export function connect() {{
 	return {{
 		list: (pattern) => pattern == null
@@ -95,6 +106,10 @@ export function connect() {{
 			: [{{ get_status: {{}}, get_clients: {{}} }}],
 		call: (object, method, args) => {{
 			let db = json(readfile('{stage}/bus.json'));
+			if (object == 'umdns' && method == 'query') {{
+				writefile('{stage}/queries.jsonl', (readfile('{stage}/queries.jsonl') ?? '') + sprintf('%J', args) + '\n');
+				return {{}};
+			}}
 			if (object == 'network.device')
 				return db.devices[args.name];
 			return db[object + ':' + method];
@@ -136,9 +151,16 @@ export function request(cmd, flags, args) {{
                           'rate': {'rx': 17200000, 'tx': 144120000}},
                 '02:00:00:00:00:77': {'assoc': True, 'authorized': True, 'signal': -67},
             }},
-            'umdns:browse': {'_xr-roaming._tcp': {
+            'umdns:browse': {'_wrtmesh._tcp': {
                 'candidate': {'iface': 'br-lan.1', 'port': 80, 'ipv4': ['192.168.1.22', '192.168.2.1']},
                 'other-vlan': {'iface': 'br-guest', 'port': 80, 'ipv4': '192.168.1.23'},
+                'pending': {'iface': 'br-lan.1', 'port': 80, 'host': 'wrtmesh-020000000025.local'},
+                'wrong-prefix': {'iface': 'br-lan.1', 'port': 80, 'host': 'xr-020000000026.local'},
+            }, '_xr-roaming._tcp': {
+                'old-candidate': {'iface': 'br-lan.1', 'port': 80, 'ipv4': '192.168.1.23'},
+                'same-candidate': {'iface': 'br-lan.1', 'port': 80, 'ipv4': '192.168.1.22'},
+                'old-pending': {'iface': 'br-lan.1', 'port': 80, 'host': 'xr-020000000027.local'},
+                'wrong-prefix': {'iface': 'br-lan.1', 'port': 80, 'host': 'wrtmesh-020000000028.local'},
             }},
         }
         (stage / 'bus.json').write_text(json.dumps(bus))
@@ -164,13 +186,13 @@ export function request(cmd, flags, args) {{
 
         def rpc(method, **args):
             script = (
-                f"let rpc = loadfile('{stage}/xrmesh.uc', {{raw_mode: true}})().xrmesh;"
+                f"let rpc = loadfile('{stage}/wrtmesh.uc', {{raw_mode: true}})().wrtmesh;"
                 f"print(rpc['{method}'].call({{args: {json.dumps(args)}}}));"
             )
             return json.loads(run(['-e', script]))
 
         def cgi(remote, method='GET', query='', server='192.168.1.20'):
-            response = run([str(stage / 'xr-mesh.cgi')], REQUEST_METHOD=method,
+            response = run([str(stage / 'wrtmesh.cgi')], REQUEST_METHOD=method,
                            QUERY_STRING=query, SERVER_ADDR=server, REMOTE_ADDR=remote)
             head, data = response.split('\n\n', 1)
             return int(head.split()[1]), json.loads(data)
@@ -214,7 +236,17 @@ export function request(cmd, flags, args) {{
         assert data['peers'][0]['online'] and data['peers'][0]['status'] == 'fresh' and station['signal'] == -51
         assert data['peers'][0]['age'] == 8 and data['local_updated_at'] - data['peers'][0]['updated_at'] == 8
         assert (station['ipv4'], station['ipv6'], station['rx']) == ('192.168.1.42', None, 96070000)
-        assert rpc('discover')['candidates'] == [{'address': '192.168.1.22', 'name': 'candidate'}]
+        discovery = rpc('discover')
+        assert discovery['pending']
+        assert sorted(discovery['candidates'], key=lambda peer: peer['address']) == [
+            {'address': '192.168.1.22', 'name': 'candidate'},
+            {'address': '192.168.1.23', 'name': 'old-candidate'},
+        ]
+        questions = [json.loads(line)['question'] for line in (stage / 'queries.jsonl').read_text().splitlines()]
+        assert questions == ['wrtmesh-020000000025.local', 'xr-020000000027.local']
+        assert rpc('scan') == {'scanning': True}
+        questions = [json.loads(line)['question'] for line in (stage / 'queries.jsonl').read_text().splitlines()]
+        assert questions[-2:] == ['_wrtmesh._tcp.local', '_xr-roaming._tcp.local']
         reply('192.168.1.21-identity', 200, {'version': 1, 'bridge_mac': legacy_mac,
                                            'name': 'Second AP', 'profiles': {'main': [bssid]}})
         assert rpc('identify', address='192.168.1.21')['peer']['profiles'] == {'main': [bssid]}
@@ -280,6 +312,20 @@ print({{ truncated: sample.truncated, count: length(sample.stations), wire: leng
         sizes = json.loads(size_check)
         assert sizes['truncated'] and 0 < sizes['count'] < 256
         assert sizes['wire'] < 65536 and sizes['local'] < 65536 and sizes['cache'] < 1048576
+        # Compatibility fallback is bounded to the old read-only endpoint and
+        # happens only when the canonical endpoint actually answers 404.
+        reply('192.168.1.21-legacy', 200, remote)
+        for status, expected_paths in ((404, ['/cgi-bin/wrtmesh', '/cgi-bin/xr-mesh']),
+                                       (403, ['/cgi-bin/wrtmesh']), (None, ['/cgi-bin/wrtmesh'])):
+            reply('192.168.1.21', status)
+            (stage / 'http-calls.jsonl').write_text('')
+            run(['-e', f"""
+import * as mesh from '{stage}/mesh.uc';
+let result = mesh.fetch_response({{address:'192.168.1.20', mask:24, device:'br-lan.1'}}, '192.168.1.21', false);
+print(result.status);
+"""])
+            calls = [json.loads(line)['path'] for line in (stage / 'http-calls.jsonl').read_text().splitlines()]
+            assert calls == expected_paths
         at(285)
         assert cgi('192.168.1.21')[0] == 503
         assert rpc('remove', bridge_mac=legacy_mac) == {'saved': True}

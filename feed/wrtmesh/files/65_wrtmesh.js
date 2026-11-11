@@ -2,7 +2,7 @@
 'require baseclass';
 'require network';
 'require rpc';
-'require xrmesh';
+'require wrtmesh';
 
 const checkAccess = rpc.declare({
 	object: 'session', method: 'access', params: ['scope', 'object', 'function'],
@@ -26,7 +26,7 @@ function identity(station, peer) {
 
 function groupClients(data) {
 	const groups = (data.peers || []).map(peer => ({
-		peer, name: xrmesh.nodeName(peer), clients: [], overlaps: 0
+		peer, name: wrtmesh.nodeName(peer), clients: [], overlaps: 0
 	}));
 	const byIdentity = new Map();
 
@@ -177,8 +177,8 @@ function clientTable(group, hints) {
 			clientCell(headings[0], clientDetails(client, links, hints)),
 			clientCell(headings[1], E('span', {}, [ssids.join(', ') || '—'])),
 			clientCell(headings[2], linkRows(link => link.label)),
-			clientCell(headings[3], linkRows(link => xrmesh.stationSignal(link.signal))),
-			clientCell(headings[4], linkRows(link => xrmesh.stationRates(link, true)))
+			clientCell(headings[3], linkRows(link => wrtmesh.stationSignal(link.signal))),
+			clientCell(headings[4], linkRows(link => wrtmesh.stationRates(link, true)))
 		]);
 	});
 	return E('table', { class: 'table wrtmesh-client-table', role: 'table', 'aria-label': group.name }, [
@@ -231,9 +231,9 @@ return baseclass.extend({
 	title: _('Mesh'),
 
 	async load() {
-		const data = await xrmesh.loadStatus();
+		const data = await wrtmesh.loadStatus();
 		if (!data) {
-			const allowed = await L.resolveDefault(checkAccess('ubus', 'xrmesh', 'status'), null);
+			const allowed = await L.resolveDefault(checkAccess('ubus', 'wrtmesh', 'status'), null);
 			return { error: allowed === false ? 'forbidden' : 'unavailable' };
 		}
 
@@ -259,9 +259,9 @@ return baseclass.extend({
 				openClients.delete(key);
 
 		return E('div', { class: 'wrtmesh-overview' }, [
-			xrmesh.stylesheet(),
+			wrtmesh.stylesheet(),
 			E('h4', {}, _('Mesh topology')),
-			xrmesh.topology(result.data),
+			wrtmesh.topology(result.data),
 			E('h4', {}, _('Peer wireless clients')),
 			groups.some(group => group.clients.length) ? E('p', { class: 'cbi-section-descr' },
 				_('AP RX is from the client. AP TX is to the client. Rates are negotiated link rates.')) : null,

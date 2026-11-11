@@ -1,6 +1,6 @@
 # Inert roaming regression fixtures
 
-Run `python3 tests/test-xr-roaming.py` from a checkout. The runner
+Run `python3 tests/test-roaming.py` from a checkout. The runner
 copies these inputs and the actual package runtime to a temporary directory;
 tests never modify the source tree. Python 3, jq and ordinary POSIX utilities
 are needed. The fixture creates local UNIX sockets, so a sandbox must permit

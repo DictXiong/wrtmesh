@@ -68,7 +68,7 @@ record('reject_missing_own_NR',lambda:parse(1,neighbors='FAIL\n',ok=False))
 
 class Fixture:
  def __init__(self):
-  self.temp=tempfile.TemporaryDirectory(prefix='xr-roaming-fixture-');self.p=Path(self.temp.name)
+  self.temp=tempfile.TemporaryDirectory(prefix='wrtmesh-fixture-');self.p=Path(self.temp.name)
   self.state=self.p/'state';self.public=self.p/'public';self.web=self.p/'web';self.ctrl=self.p/'ctrl'
   self.ctrl.mkdir();self.sockets=[]
   for i in range(3):
@@ -84,7 +84,7 @@ class Fixture:
   def script(name,text):
    path=self.bin/name;path.write_text('#!'+shutil.which('python3')+'\n'+text);path.chmod(0o700);return path
   cli=script('cli',f'import sys,pathlib\ns=sys.argv[sys.argv.index("-i")+1];link=int(s.rsplit("link",1)[1]);command=sys.argv[-1]\nprint((pathlib.Path({str(S)!r})/f"proof/link{{link}}-{{command}}.txt").read_text(),end="")\n')
-  uci=script('uci',f'import sys,json\na=sys.argv\nv=json.load(open({str(self.config)!r}))\nif "show" in a: print("network.@device[0]=device")\nelif a[-1]=="network.@device[0].name":print("br-lan")\nelif a[-1]=="network.@device[0].macaddr":print("02:00:00:00:00:02")\nelif a[-1]=="xr_roaming.main":print("roaming")\nelse: print(v.get(a[-1].rsplit(".",1)[1],""))\n')
+  uci=script('uci',f'import sys,json\na=sys.argv\nv=json.load(open({str(self.config)!r}))\nif "show" in a: print("network.@device[0]=device")\nelif a[-1]=="network.@device[0].name":print("br-lan")\nelif a[-1]=="network.@device[0].macaddr":print("02:00:00:00:00:02")\nelif a[-1]=="wrtmesh.main":print("roaming")\nelse: print(v.get(a[-1].rsplit(".",1)[1],""))\n')
   curl=script('curl',f'import sys,pathlib,shutil\na=sys.argv\nassert a[1]=="--disable" and "--noproxy" in a and "--max-filesize" in a and "--proto" in a and "--interface" in a\nwith open({str(self.curl_log)!r},"a")as f:f.write(a[a.index("--interface")+1]+"\\n")\np=pathlib.Path({str(self.http)!r})\nif not p.exists():sys.exit(22)\nshutil.copyfile(p,a[a.index("--output")+1])\n')
   ubus=script('ubus',f'import sys,json,pathlib\na=sys.argv\nif "network.interface.lan" in a:print(pathlib.Path({str(self.lan_status)!r}).read_text())\nelif a[-1]=="get_status":print(json.dumps({{"ssid":"TestMain","status":"ENABLED","bssid":{own[0]["bssid"]!r}}}))\nelse:\n assert "rrm_nr_set" in a\n with open({str(self.actions)!r},"a")as f:f.write(a[-1]+"\\n")\n if pathlib.Path({str(self.p/'ubus-fail')!r}).exists():sys.exit(1)\n print("{{}}")\n')
   text=(S/'helper.sh').read_text()
@@ -174,7 +174,7 @@ try:
  record('nonzero_MLD_set_return_is_failure',ubus_failure)
  record('nonzero_clear_MLD_set_return_is_failure',lambda:f.run('clear',ok=False))
  def missing_tool_gate():
-  original=f.helper.read_text();f.helper.write_text(re.sub(r'(for utility in [^\n]*)(; do)',r'\1 xr_required_missing_fixture\2',original))
+  original=f.helper.read_text();f.helper.write_text(re.sub(r'(for utility in [^\n]*)(; do)',r'\1 wrtmesh_required_missing_fixture\2',original))
   f.run('preflight',ok=False);f.helper.write_text(original)
  record('missing_external_utility_rejected_before_state_access',missing_tool_gate)
  def wrong_owner():

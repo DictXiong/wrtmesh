@@ -4,12 +4,12 @@
 import * as fs from 'fs';
 import * as uci from 'uci';
 
-export const state = '/tmp/xr-roaming-private/mesh';
+export const state = '/tmp/wrtmesh-private/mesh';
 export const ttl = 95;
 export const limit = 15;
 export const response_limit = 65536;
 export const cache_limit = 1048576;
-export const service = '_xr-roaming._tcp';
+export const service = '_wrtmesh._tcp';
 
 export function mac(s) {
 	if (type(s) != 'string')
@@ -115,18 +115,154 @@ export function peer_key(addr) {
 	return 'p_' + replace(addr, /:/g, '');
 }
 
-export function profiles(cursor) {
+export function profiles(cursor, include_disabled) {
 	let result = {};
-	cursor.foreach('xr_roaming', 'roaming', s => {
-		if (s.enabled == '1' && profile(s['.name']))
+	cursor.foreach('wrtmesh', 'roaming', s => {
+		if ((include_disabled || s.enabled == '1') && profile(s['.name']))
 			result[s['.name']] = true;
 	});
 	return result;
 }
 
+export function section_id(value) {
+	return type(value) == 'string' && match(value, /^[A-Za-z0-9_]{1,64}$/) ? value : null;
+}
+
+export function profile_metadata(iface, mlo, max_links) {
+	return type(iface) == 'string' && match(iface, /^[A-Za-z][A-Za-z0-9_.-]{0,14}$/) &&
+		type(mlo) == 'bool' && type(max_links) == 'int' && max_links >= 1 && max_links <= 3 &&
+		(mlo || max_links == 1) ? { iface, mlo, max_links } : null;
+}
+
+export function profile_timers(interval, ttl) {
+	return type(interval) == 'int' && interval >= 30 && interval <= 300 &&
+		type(ttl) == 'int' && ttl >= 180 && ttl <= 1800 && ttl >= interval * 3;
+}
+
+function option_number(value) {
+	return type(value) == 'string' && match(value, /^(0|[1-9][0-9]{0,9})$/) ? int(value) : null;
+}
+
+export function local_ssids(cursor, bus) {
+	let runtime = call(bus, 'network.wireless', 'status');
+	let sections = {}, status_cache = {}, result = [];
+	for (let radio, data in runtime) {
+		for (let item in array(data.interfaces)) {
+			let name = section_id(item.section);
+			if (name) {
+				sections[name] ??= [];
+				push(sections[name], { radio, ifname: item.ifname });
+			}
+		}
+	}
+	cursor.foreach('wireless', 'wifi-iface', s => {
+		if (s.mode != 'ap')
+			return;
+		let section = s['.name'], ssid = label(s.ssid, 32) ?? '';
+		let configured_devices = type(s.device) == 'string' ? split(s.device, /[[:space:]]+/) : array(s.device);
+		let devices = filter(configured_devices, dev);
+		let entries = sections[section] ?? [];
+		// Older netifd status can omit section. An explicit configured interface
+		// still identifies it without guessing from a duplicated SSID.
+		if (!length(entries) && dev(s.ifname)) {
+			for (let radio, data in runtime)
+				for (let item in array(data.interfaces))
+					if (item.ifname == s.ifname)
+						push(entries, { radio, ifname: item.ifname });
+		}
+		let bases = {};
+		for (let item in entries) {
+			let parts = type(item.ifname) == 'string' ? match(item.ifname, /^(.+)_link([0-9]{1,2})$/) : null;
+			let iface = dev(parts ? parts[1] : item.ifname);
+			if (iface)
+				bases[iface] = true;
+		}
+		let names = keys(bases), iface = length(names) == 1 ? names[0] : null;
+		let status = iface ? status_cache[iface] ??= call(bus, 'hostapd.' + iface, 'get_status') : {};
+		let available = status.status == 'ENABLED';
+		let mlo = type(status.links) == 'array';
+		let links = [];
+		for (let link in slice(array(status.links), 0, 16)) {
+			if (type(link.link_id) == 'int' && link.link_id >= 0 && link.link_id <= 15 && mac(link.bssid))
+				push(links, { id: link.link_id, bssid: mac(link.bssid),
+					freq: type(link.freq) == 'int' ? link.freq : null });
+		}
+		let max_links = mlo ? max(length(devices), length(links), 1) : 1;
+		let metadata = profile_metadata(iface, mlo, max_links);
+		let reason = !section_id(section) || !length(ssid) ? 'invalid_profile_section' :
+			length(names) > 1 ? 'profile_runtime_ambiguous' :
+			s.disabled == '1' || !available ? 'profile_runtime_unavailable' :
+			status.ssid != ssid || (s.mlo == '1' && !mlo) ? 'profile_runtime_mismatch' :
+			!metadata ? 'profile_metadata_unsupported' : null;
+		push(result, { section, ssid, devices, disabled: s.disabled == '1', available,
+			supported: reason == null, reason, iface, mlo, max_links, links,
+			bssid: mac(status.bssid) ?? mac(s.macaddr) });
+	});
+	return result;
+}
+
+export function local_profiles(cursor, ssids) {
+	let result = [];
+	let legacy = {
+		main: { iface: 'ap-mld1', mlo: true, max_links: 3 },
+		battalion: { iface: 'ap-mld0', mlo: true, max_links: 2 },
+		guest: { iface: 'ap-mld2', mlo: true, max_links: 2 },
+		iot: { iface: 'phy0.0-ap1', mlo: false, max_links: 1 }
+	};
+	cursor.foreach('wrtmesh', 'roaming', s => {
+		let id = s['.name'], section = s.section ?? '', selected;
+		let old = !s.mlo && !s.max_links ? legacy[id] : null;
+		let metadata = old ? profile_metadata(s.iface || old.iface, old.mlo, old.max_links) :
+			index(['0', '1'], s.mlo) >= 0 ? profile_metadata(s.iface, s.mlo == '1', option_number(s.max_links)) : null;
+		if (old && metadata?.iface != old.iface)
+			metadata = null;
+		for (let item in ssids)
+			if (item.section == section)
+				selected = item;
+		if (!section && id == 'main' && old) {
+			let matches = filter(ssids, item => item.ssid == s.ssid && item.iface == metadata?.iface);
+			if (length(matches) == 1)
+				selected = matches[0];
+		}
+		let interval = option_number(s.interval), ttl = option_number(s.ttl);
+		let reason = !profile(id) ? 'invalid_profile_id' :
+			index(['', '0', '1'], s.enabled ?? '') < 0 ? 'invalid_profile_enabled' :
+			!profile_timers(interval, ttl) ? 'invalid_profile_timers' :
+			!metadata ? 'profile_metadata_unsupported' :
+			!selected ? 'invalid_profile_section' :
+			selected.reason ??
+			(metadata.iface != selected.iface || metadata.mlo != selected.mlo ||
+			 metadata.max_links < selected.max_links ? 'profile_runtime_mismatch' : null);
+		push(result, { id, enabled: s.enabled == '1', section: selected?.section ?? section,
+			ssid: selected?.ssid ?? label(s.ssid, 32), iface: metadata?.iface ?? s.iface ?? '',
+			mlo: metadata?.mlo, max_links: metadata?.max_links,
+			interval: interval ?? 30, ttl: ttl ?? 180, available: selected?.available ?? false,
+			supported: reason == null, reason, legacy: !!old });
+	});
+	let controllers = {};
+	for (let item in result)
+		if (item.enabled && item.iface) {
+			if (controllers[item.iface]) {
+				item.supported = controllers[item.iface].supported = false;
+				item.reason = controllers[item.iface].reason = 'duplicate_profile_section';
+			} else {
+				controllers[item.iface] = item;
+			}
+		}
+	return result;
+}
+
+export function reconcile() {
+	try {
+		return system(['/etc/init.d/wrtmesh', 'reload'], 20000) == 0;
+	} catch (e) {
+		return false;
+	}
+}
+
 export function overrides(cursor) {
 	let result = {};
-	cursor.foreach('xr_mesh', 'peer', s => {
+	cursor.foreach('wrtmesh_peers', 'peer', s => {
 		let addr = mac(s.bridge_mac);
 		if (!addr || s['.name'] != peer_key(addr))
 			return;
@@ -145,10 +281,24 @@ export function overrides(cursor) {
 
 export function peer_inventory(cursor, overlay) {
 	let provisioned = {}, legacy = {}, conflicts = {};
-	cursor.foreach('xr_roaming', 'peer', s => { provisioned[s['.name']] = s; });
-	cursor.foreach('xr_roaming', 'roaming', s => {
+	cursor.foreach('wrtmesh', 'peer', s => { provisioned[s['.name']] = s; });
+	for (let id, p in provisioned) {
+		let addr = mac(p.bridge_mac);
+		if (!addr || !private_ip(p.address))
+			continue;
+		if (legacy[addr] && legacy[addr].address != p.address)
+			conflicts[addr] = true;
+		legacy[addr] ??= { bridge_mac: addr, address: p.address, name: label(p.name, 64) ?? '', profiles: {} };
+		for (let option, raw in p) {
+			let m = match(option, /^([A-Za-z][A-Za-z0-9_]{0,47})_bssid$/);
+			let list = m ? pins(raw) : null;
+			if (list)
+				legacy[addr].profiles[m[1]] = list;
+		}
+	}
+	cursor.foreach('wrtmesh', 'roaming', s => {
 		let id = s['.name'];
-		if (s.enabled != '1' || !profile(id))
+		if (!profile(id))
 			return;
 		let ids = type(s.peers) == 'string' ? split(s.peers, /[[:space:]]+/) : array(s.peers);
 		let sources = s.peer_mode == 'fleet' ? map(ids, i => provisioned[i]) :
@@ -172,7 +322,7 @@ export function peer_inventory(cursor, overlay) {
 export function advertised_profiles(cursor, addr) {
 	let result = {};
 	for (let id in keys(profiles(cursor))) {
-		let path = '/tmp/xr-roaming-public/' + (id == 'main' ? '' : id + '/') + 'own.json';
+		let path = '/tmp/wrtmesh-public/' + (id == 'main' ? '' : id + '/') + 'own.json';
 		let own = read_json(path, 16384);
 		if (own?.version != 1 || own.bridge_mac != addr || !array(own.reports)[0])
 			continue;
@@ -183,32 +333,64 @@ export function advertised_profiles(cursor, addr) {
 	return result;
 }
 
+export function local_profile_bssids(cursor, bus) {
+	let result = advertised_profiles(cursor, identity(bus).bridge_mac);
+	let ssids = local_ssids(cursor, bus);
+	for (let p in local_profiles(cursor, ssids)) {
+		let network = filter(ssids, item => item.section == p.section)[0];
+		let addresses = [network?.bssid, ...map(network?.links ?? [], link => link.bssid)];
+		result[p.id] ??= [];
+		for (let address in addresses)
+			if (address && index(result[p.id], address) < 0)
+				push(result[p.id], address);
+	}
+	return result;
+}
+
+function monotonic_ms() {
+	let value = clock(true) ?? clock();
+	return value[0] * 1000 + int(value[1] / 1000000);
+}
+
 export function fetch_response(lan, address, identity_only) {
 	if (!on_lan(lan, address))
 		return { status: 'unreachable' };
-	let directory = fs.mkdtemp('/tmp/xr-mesh-fetch.XXXXXX');
+	let directory = fs.mkdtemp('/tmp/wrtmesh-fetch.XXXXXX');
 	if (!directory)
 		return { status: 'unavailable' };
 	let file = directory + '/reply';
 	let headers = directory + '/headers';
-	let max = identity_only ? 4096 : response_limit;
-	let path = '/cgi-bin/xr-mesh' + (identity_only ? '?identity=1' : '');
+	let max_bytes = identity_only ? 4096 : response_limit;
+	let query = identity_only ? '?identity=1' : '';
+	let started = monotonic_ms();
 	let result = { status: 'unreachable' };
 	try {
-		let rc = system(['/usr/bin/curl', '--disable', '--silent', '--fail', '--noproxy', '*',
-			'--proto', '=http', '--interface', lan.address, '--connect-timeout', '1',
-			'--max-time', '2', '--max-filesize', sprintf('%d', max),
-			'--dump-header', headers, '--output', file,
-			'http://' + address + path], 2500);
-		let code = int(match(fs.readfile(headers, 128) ?? '', /^HTTP\/[0-9.]+ ([0-9]{3})[[:space:]]/)?.[1]);
-		if (!rc && code == 200)
-			result = { status: 'ok', data: read_json(file, max) };
-		else if (code == 401 || code == 403)
-			result.status = 'forbidden';
-		else if (code == 503)
-			result.status = 'stale';
-		else if (code)
-			result.status = 'unavailable';
+		// The old information endpoint is tried only after a canonical 404.
+		// Both attempts share the existing per-peer deadline.
+		for (let path in ['/cgi-bin/wrtmesh', '/cgi-bin/xr-mesh']) {
+			let remaining = 2500 - (monotonic_ms() - started);
+			if (remaining <= 0)
+				break;
+			fs.unlink(headers);
+			let rc = system(['/usr/bin/curl', '--disable', '--silent', '--fail', '--noproxy', '*',
+				'--proto', '=http', '--interface', lan.address, '--connect-timeout', '1',
+				'--max-time', sprintf('%.3f', min(2000, remaining) / 1000),
+				'--max-filesize', sprintf('%d', max_bytes), '--dump-header', headers, '--output', file,
+				'http://' + address + path + query], remaining);
+			let code = int(match(fs.readfile(headers, 128) ?? '', /^HTTP\/[0-9.]+ ([0-9]{3})[[:space:]]/)?.[1]);
+			if (!rc && code == 200)
+				result = { status: 'ok', data: read_json(file, max_bytes) };
+			else if (code == 401 || code == 403)
+				result.status = 'forbidden';
+			else if (code == 503)
+				result.status = 'stale';
+			else if (code)
+				result.status = 'unavailable';
+			else
+				result.status = 'unreachable';
+			if (code != 404)
+				break;
+		}
 	} catch (e) {
 		result.status = 'unavailable';
 	}

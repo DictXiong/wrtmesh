@@ -3,7 +3,7 @@
 'use strict';
 
 import * as ubus from 'ubus';
-import * as mesh from '/usr/lib/xr-roaming/mesh.uc';
+import * as mesh from '/usr/lib/wrtmesh/mesh.uc';
 
 function reply(status, data) {
 	printf('Status: %s\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n%J\n', status, data);

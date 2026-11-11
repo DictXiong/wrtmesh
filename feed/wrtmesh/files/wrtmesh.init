@@ -5,13 +5,13 @@ USE_PROCD=1
 mesh_announce() {
  local mac host
  [ -r /sys/class/net/br-lan/address ] && read -r mac < /sys/class/net/br-lan/address || return 0
- host=xr-$(printf '%s' "$mac" | tr -d :)
+ host=wrtmesh-$(printf '%s' "$mac" | tr -d :)
  procd_open_data
  json_add_object mdns
- json_add_object xrmesh
+ json_add_object wrtmesh
  json_add_string instance "$host"
  json_add_string hostname "$host.local"
- json_add_string service _xr-roaming._tcp.local
+ json_add_string service _wrtmesh._tcp.local
  json_add_int port 80
  json_close_object
  json_close_object
@@ -19,21 +19,22 @@ mesh_announce() {
 }
 start_service() {
  local profile profiles
- profiles=$(/usr/lib/xr-roaming/helper.sh profiles) || return 1
- if [ -x /usr/lib/xr-roaming/mesh-daemon.sh ]; then
+ /usr/lib/wrtmesh/migrate-config.sh || return 1
+ profiles=$(/usr/lib/wrtmesh/helper.sh profiles) || return 1
+ if [ -x /usr/lib/wrtmesh/mesh-daemon.sh ]; then
   procd_open_instance mesh-observer
-  procd_set_param command /usr/lib/xr-roaming/mesh-daemon.sh
+  procd_set_param command /usr/lib/wrtmesh/mesh-daemon.sh
   procd_set_param respawn 3600 5 5
   procd_set_param term_timeout 5
   mesh_announce
   procd_close_instance
  fi
  for profile in $profiles; do
-  [ "$(uci -q get xr_roaming.$profile.enabled)" = 1 ] || continue
+  [ "$(uci -q get wrtmesh.$profile.enabled)" = 1 ] || continue
   # The daemon validates its tools/config and takes its own exclusive lock.
   # Preflight here would race a running instance during declarative reload.
   procd_open_instance "$profile"
-  procd_set_param command /usr/lib/xr-roaming/helper.sh daemon "$profile"
+  procd_set_param command /usr/lib/wrtmesh/helper.sh daemon "$profile"
   procd_set_param respawn 3600 5 5
   procd_set_param term_timeout 15
   procd_set_param stdout 0
@@ -45,7 +46,7 @@ start_service() {
 # keep their PID, newly enabled/dead instances start, omitted instances stop.
 # This does not reload wireless or restart healthy metadata workers.
 reload_service() {
- local state=/tmp/xr-roaming-private token temp
+ local state=/tmp/wrtmesh-private token temp
  if [ -d "$state" ] && [ ! -L "$state" ]; then
   umask 077
   [ "$(ls -nd "$state" | awk '{print $3}')" = 0 ] && chmod 700 "$state" || return 1
@@ -57,6 +58,6 @@ reload_service() {
  start
 }
 service_triggers() {
- procd_add_reload_trigger xr_roaming xr_mesh
+ procd_add_reload_trigger wrtmesh wrtmesh_peers wireless
  procd_add_reload_interface_trigger lan
 }

@@ -2,7 +2,7 @@
 'require baseclass';
 'require rpc';
 
-const getStatus = rpc.declare({ object: 'xrmesh', method: 'status', raise: true });
+const getStatus = rpc.declare({ object: 'wrtmesh', method: 'status', raise: true });
 const openPaths = new Set();
 let cachedStatus, refreshAt = 0;
 
@@ -192,7 +192,7 @@ return baseclass.extend({
 	nodeName,
 
 	stylesheet() {
-		return E('link', { rel: 'stylesheet', href: L.resource('xrmesh.css') });
+		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css') });
 	},
 
 	topology(data) {

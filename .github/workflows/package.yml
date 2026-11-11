@@ -17,8 +17,8 @@ jobs:
           sudo apt-get install -y build-essential gawk gettext git jq libncurses-dev libssl-dev python3-setuptools rsync unzip zstd file curl
       - name: Test roaming and package hooks
         run: |
-          sudo python3 tests/check-xr-roaming-package.py
-          sudo python3 tests/test-xr-roaming.py
+          sudo python3 tests/check-wrtmesh-package.py
+          sudo python3 tests/test-roaming.py
       - name: Build and sign APK
         run: python3 ci/build-package.py --work "$RUNNER_TEMP/wrtmesh-sdk" --output artifacts --jobs "$(nproc)"
       - name: Verify APK name transition

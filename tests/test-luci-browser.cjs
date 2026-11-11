@@ -21,10 +21,10 @@ const scripts = {
 	overview: fs.readFileSync(path.join(luci, status, 'index.js'), 'utf8'),
 	wifi: fs.readFileSync(path.join(luci, status, 'include/60_wifi.js'), 'utf8'),
 	include: source('65_wrtmesh.js', 'view/status/include/65_wrtmesh.js'),
-	mesh: source('xrmesh.js'),
-	management: source('xrmesh-view.js', 'view/network/xrmesh.js')
+	mesh: source('wrtmesh.js'),
+	management: source('wrtmesh-view.js', 'view/network/wrtmesh.js')
 };
-assert(!scripts.wifi.includes('xrmesh'), 'provide the unpatched LuCI source');
+assert(!scripts.wifi.includes('wrtmesh'), 'provide the unpatched LuCI source');
 if (process.env.WRTMESH_LEGACY_WIFI)
 	scripts.legacyWifi = fs.readFileSync(process.env.WRTMESH_LEGACY_WIFI, 'utf8');
 
@@ -49,6 +49,17 @@ const peer = (n, name, status, stations, age = 0) => ({
 	data: status === 'fresh' ? { name, gateway, stations } : null
 });
 const mesh = peers => ({ address: '192.168.50.2', local, local_age: 0, peers, profiles: [] });
+const configuration = {
+	profiles: [],
+	ssids: [
+		{ section: 'ssid_main', ssid: 'Local Wi-Fi', iface: 'ap-mld0', mlo: true,
+			max_links: 3, available: true, supported: true },
+		{ section: 'ssid_iot', ssid: 'Local IoT', iface: 'ap-iot', mlo: false,
+			max_links: 1, available: true, supported: true }
+	],
+	limits: { profiles: 17, interval: { min: 30, max: 300, default: 30 },
+		ttl: { min: 180, max: 1800, default: 180 } }
+};
 const peers = [
 	peer('11', 'Office', 'fresh', [mobileClient, station('21')], 2),
 	peer('12', 'Upstairs', 'fresh', [station('12', { mld })], 30),
@@ -61,7 +72,7 @@ const peers = [
 ];
 
 async function harness(browser, { installed = true, data, writable = false, readable = true, mobile = false,
-	legacyWifi = false }) {
+	legacyWifi = false, config = configuration, configReadable = true }) {
 	const page = await browser.newPage({ viewport: { width: mobile ? 390 : 1300, height: 940 } });
 	const errors = [];
 	page.on('pageerror', error => errors.push(error.message));
@@ -71,12 +82,12 @@ async function harness(browser, { installed = true, data, writable = false, read
 			return route.abort();
 		if (url.pathname === '/')
 			return route.fulfill({ contentType: 'text/html', body: '<main></main>' });
-		if (url.pathname.endsWith('/xrmesh.css'))
-			return route.fulfill({ contentType: 'text/css', body: source('xrmesh.css') });
+		if (url.pathname.endsWith('/wrtmesh.css'))
+			return route.fulfill({ contentType: 'text/css', body: source('wrtmesh.css') });
 		return route.fulfill({ status: 404, body: '' });
 	});
 	await page.goto('http://wrtmesh.test/');
-	await page.evaluate(async ({ scripts, installed, data, writable, readable, legacyWifi }) => {
+	await page.evaluate(async ({ scripts, installed, data, writable, readable, legacyWifi, config, configReadable }) => {
 		window._ = text => text;
 		String.prototype.format = function (...values) {
 			return this.replace(/%([sdh]|\.(\d+)f)/g, (_, kind, decimals) => {
@@ -118,21 +129,55 @@ async function harness(browser, { installed = true, data, writable = false, read
 		window.baseclass = window.view = { extend: implementation => implementation };
 		window.dom = { content: (node, content) => node.replaceChildren(content) };
 		window.ui = { createHandlerFn: (ctx, fn, ...args) =>
-			(typeof fn === 'string' ? ctx[fn] : fn).bind(ctx, ...args) };
+			(typeof fn === 'string' ? ctx[fn] : fn).bind(ctx, ...args),
+			showModal: (title, contents) => {
+				const dialog = E('section', { role: 'dialog', 'aria-label': title }, [
+					E('h2', {}, title), ...contents
+				]);
+				document.querySelector('[role="dialog"]')?.remove();
+				document.body.append(dialog);
+				return dialog;
+			},
+			hideModal: () => document.querySelector('[role="dialog"]')?.remove(),
+			addNotification: (_, content) => document.body.append(E('div', { role: 'alert' }, content))
+		};
 		window.uci = { get: () => null, load: async () => ({}) };
 		window.firewall = { getZones: async () => [] };
 		window.poll = { add: fn => { window.pollOverview = fn; } };
-		window.mock = { data, calls: 0, now: Date.now() };
+		window.mock = { data, configuration: config, calls: 0, configCalls: 0, operations: [], now: Date.now() };
 		Date.now = () => window.mock.now;
 		window.rpc = { declare: ({ object, method, expect }) => async (...args) => {
-			if (object === 'xrmesh' && method === 'status') {
+			if (object === 'wrtmesh' && method === 'status') {
 				window.mock.calls++;
 				if (window.mock.data === null)
 					throw new Error('RPC unavailable');
 				return window.mock.data;
 			}
+			if (object === 'wrtmesh' && method === 'configuration') {
+				window.mock.configCalls++;
+				return window.mock.configuration;
+			}
+			if (object === 'wrtmesh' && method === 'profile_save') {
+				window.mock.operations.push({ method, args });
+				const [id, section, enabled, interval, ttl] = args;
+				const ssid = window.mock.configuration.ssids.find(choice => choice.section === section);
+				const value = { ...ssid, id, enabled, interval, ttl };
+				const index = window.mock.configuration.profiles.findIndex(profile => profile.id === id);
+				if (index < 0)
+					window.mock.configuration.profiles.push(value);
+				else
+					window.mock.configuration.profiles[index] = value;
+				window.mock.data.profiles = window.mock.configuration.profiles.filter(profile => profile.enabled).map(profile => profile.id);
+				return window.mock.profileReloadFail ? { saved: true, error: 'service_reload_failed' } : { saved: true };
+			}
+			if (object === 'wrtmesh' && method === 'profile_remove') {
+				window.mock.operations.push({ method, args });
+				window.mock.configuration.profiles = window.mock.configuration.profiles.filter(profile => profile.id !== args[0]);
+				return { saved: true };
+			}
 			if (object === 'session' && method === 'access') {
-				const access = args.includes('save') ? writable : args.includes('status') ? readable : true;
+				const access = args.includes('save') || args.includes('profile_save') ? writable :
+					args.includes('status') ? readable : args.includes('configuration') ? configReadable : true;
 				return expect?.access !== undefined ? access : { access };
 			}
 			throw new Error('Unexpected RPC ' + object + '.' + method);
@@ -180,7 +225,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 			}
 		};
 		window.renderBadge = (icon, label, ...items) => L.itemlist(E('span'), items);
-		window.xrmesh = modules.xrmesh = new Function(scripts.mesh)();
+		window.wrtmesh = modules.wrtmesh = new Function(scripts.mesh)();
 		modules['view.status.include.60_wifi'] = new Function(legacyWifi ? scripts.legacyWifi : scripts.wifi)();
 		if (installed)
 			modules['view.status.include.65_wrtmesh'] = new Function(scripts.include)();
@@ -190,7 +235,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 			const management = new Function(scripts.management)();
 			document.querySelector('main').replaceChildren(management.render(await management.load()));
 		};
-	}, { scripts, installed, data, writable, readable, legacyWifi });
+	}, { scripts, installed, data, writable, readable, legacyWifi, config, configReadable });
 	return { page, errors };
 }
 
@@ -232,6 +277,10 @@ async function harness(browser, { installed = true, data, writable = false, read
 		assert.equal(await page.evaluate(() => mock.calls), 2, 'Mesh view reuses cached data');
 		assert.equal(await page.getByRole('img', { name: 'Mesh topology' }).count(), 1);
 		assert.equal(await page.getByRole('heading', { name: 'Associated Stations' }).count(), 1);
+		assert.equal(await page.getByRole('heading', { name: 'Local roaming profiles', exact: true }).count(), 1);
+		assert.equal(await page.getByRole('button', { name: 'Add local roaming profile', exact: true }).count(), 0);
+		await page.evaluate(() => pollOverview());
+		assert.equal(await page.evaluate(() => mock.configCalls), 1, 'routine polling does not repeat wireless configuration discovery');
 		assert.deepEqual(errors, []);
 		await page.close();
 
@@ -243,6 +292,71 @@ async function harness(browser, { installed = true, data, writable = false, read
 			assert.deepEqual(errors, []);
 			await page.close();
 		}
+		for (const configReadable of [false, true]) {
+			const { page, errors } = await harness(browser, { data: mesh([]), config: null, configReadable });
+			await page.evaluate(() => renderManagement());
+			const profiles = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local roaming profiles', exact: true }) });
+			assert.equal(await profiles.locator('[data-state="' + (configReadable ? 'unavailable' : 'forbidden') + '"]').count(), 1);
+			assert.equal(await profiles.getByRole('button').count(), 0);
+			await page.evaluate(() => pollOverview());
+			assert.equal(await page.evaluate(() => mock.configCalls), 1, 'read failure is not repeatedly polled');
+			assert.deepEqual(errors, []);
+			await page.close();
+		}
+		{
+			const { page, errors } = await harness(browser, { data: mesh([peer('11', 'Office', 'fresh', [])]), writable: true });
+			await page.evaluate(() => renderManagement());
+			const profiles = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local roaming profiles', exact: true }) });
+			assert.equal(await profiles.getByText('No local roaming profiles configured.', { exact: true }).count(), 1);
+			assert.equal(await page.evaluate(() => mock.configCalls), 1);
+			await profiles.getByRole('button', { name: 'Add local roaming profile', exact: true }).click();
+			let dialog = page.getByRole('dialog');
+			await dialog.getByLabel('Stable profile ID', { exact: true }).fill('office');
+			await dialog.getByLabel('Local AP SSID', { exact: true }).selectOption('ssid_main');
+			await dialog.getByText('Detected MLO with up to 3 links.', { exact: true }).waitFor();
+			await dialog.getByRole('button', { name: 'Save local profile', exact: true }).click();
+			await page.getByRole('dialog').waitFor({ state: 'detached' });
+			let row = profiles.getByRole('row').filter({ hasText: 'office' });
+			assert.match(await row.textContent(), /Local Wi-Fi.*Roaming assistance disabled/);
+			assert.deepEqual(await page.evaluate(() => mock.operations[0]), {
+				method: 'profile_save', args: ['office', 'ssid_main', false, 30, 180]
+			});
+			const peersSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Mesh peers', exact: true }) });
+			await peersSection.getByRole('button', { name: 'Edit', exact: true }).click();
+			dialog = page.getByRole('dialog');
+			assert.equal(await dialog.getByLabel('Remote BSSIDs for Local Wi-Fi (office) (optional)', { exact: true }).count(), 1,
+				'disabled local profiles are available for remote BSSID approval');
+			await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+			await row.getByRole('button', { name: 'Enable assistance', exact: true }).click();
+			await row.getByRole('button', { name: 'Disable assistance', exact: true }).waitFor();
+			assert.deepEqual(await page.evaluate(() => mock.data.profiles), ['office']);
+			await row.getByRole('button', { name: 'Edit', exact: true }).click();
+			dialog = page.getByRole('dialog');
+			assert.equal(await dialog.getByLabel('Stable profile ID', { exact: true }).getAttribute('readonly'), '');
+			await dialog.getByLabel('Local AP SSID', { exact: true }).selectOption('ssid_iot');
+			await dialog.getByLabel('Check interval (seconds)', { exact: true }).fill('120');
+			await dialog.getByLabel('Neighbor report expiry (seconds)', { exact: true }).fill('180');
+			const before = await page.evaluate(() => mock.operations.length);
+			await dialog.getByRole('button', { name: 'Save local profile', exact: true }).click();
+			assert.equal(await page.evaluate(() => mock.operations.length), before, 'invalid expiry is rejected before RPC');
+			await page.getByRole('alert').filter({ hasText: 'Expiry must be at least three times' }).waitFor();
+			await dialog.getByLabel('Neighbor report expiry (seconds)', { exact: true }).fill('600');
+			await page.evaluate(() => { mock.profileReloadFail = true; });
+			await dialog.getByRole('button', { name: 'Save local profile', exact: true }).click();
+			await page.getByRole('dialog').waitFor({ state: 'detached' });
+			row = profiles.getByRole('row').filter({ hasText: 'office' });
+			assert.match(await row.textContent(), /Local IoT.*Single link/);
+			await page.getByRole('alert').filter({ hasText: 'Settings were saved, but the roaming service could not reload.' }).waitFor();
+			await page.evaluate(() => { mock.profileReloadFail = false; });
+			await row.getByRole('button', { name: 'Disable assistance', exact: true }).click();
+			await row.getByRole('button', { name: 'Enable assistance', exact: true }).waitFor();
+			await row.getByRole('button', { name: 'Remove local profile', exact: true }).click();
+			await page.getByRole('dialog').getByRole('button', { name: 'Remove local profile', exact: true }).click();
+			await page.getByRole('dialog').waitFor({ state: 'detached' });
+			assert.equal(await profiles.getByText('No local roaming profiles configured.', { exact: true }).count(), 1);
+			assert.deepEqual(errors, []);
+			await page.close();
+		}
 		if (scripts.legacyWifi) {
 			const { page, errors } = await harness(browser, { data: mesh(peers), legacyWifi: true });
 			assert.equal(await page.getByRole('img', { name: 'Mesh topology' }).count(), 1);
@@ -250,7 +364,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 			assert.deepEqual(errors, []);
 			await page.close();
 		}
-		console.log('Chromium passed stock Overview, package include, Mesh management, multi-link overlap, refresh and access failures.');
+		console.log('Chromium passed stock Overview, Mesh display, local profile lifecycle, remote approvals, polling and failures.');
 	} finally {
 		await browser.close();
 	}
