@@ -11,6 +11,25 @@ function nodeName(peer) {
 	return name && peer.address ? name + ' (' + peer.address + ')' : name || peer.address || peer.bridge_mac || '?';
 }
 
+function stationHint(station, hints, lookup) {
+	const aliases = [station.mld, station.mac, ...(station.links || []).map(link => link.mac)];
+	for (const mac of new Set(aliases)) {
+		const value = typeof mac === 'string' && hints?.[lookup]?.(mac.toUpperCase());
+		if (value)
+			return value;
+	}
+	return null;
+}
+
+function stationIdentity(station, hints) {
+	const stations = Array.isArray(station) ? station : [station];
+	const find = (field, lookup) => stations.map(station => station[field] || stationHint(station, hints, lookup)).find(Boolean);
+	const name = find('name', 'getHostnameByMACAddr');
+	const ipv4 = find('ipv4', 'getIPAddrByMACAddr');
+	const ipv6 = find('ipv6', 'getIP6AddrByMACAddr');
+	return { name, ipv4, ipv6, label: name || ipv4 || ipv6 || '?' };
+}
+
 function pathText(path) {
 	if (!path)
 		return _('Path unknown');
@@ -268,19 +287,13 @@ return baseclass.extend({
 		]);
 	},
 
+	stationHint,
+	stationIdentity,
+
 	stationHost(station, hints) {
-		const mac = station.mac.toUpperCase();
-		const name = hints?.getHostnameByMACAddr(mac);
-		const ipv4 = station.ipv4 || hints?.getIPAddrByMACAddr(mac);
-		const ipv6 = station.ipv6 || hints?.getIP6AddrByMACAddr(mac);
-		const addresses = [ipv4, ipv6].filter(Boolean);
-		if (!name && !addresses.length)
-			return E('span', {}, ['?']);
-		return E('span', { class: 'wrtmesh-host' }, [
-			name ? E('span', {}, [name]) : null,
-			...addresses.map(address =>
-				E('small', { class: 'wrtmesh-secondary' }, [address]))
-		]);
+		const identity = stationIdentity(station, hints);
+		const addresses = [identity.ipv4, identity.ipv6].filter(address => address && address !== identity.label);
+		return E('span', { class: 'wrtmesh-host', title: addresses.join(', ') || null }, [identity.label]);
 	},
 
 	stationSignal(value) {

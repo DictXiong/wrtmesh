@@ -431,3 +431,189 @@ msgstr "无线接口"
 
 msgid "dBm"
 msgstr "dBm"
+
+msgid "2.4 GHz"
+msgstr "2.4 GHz"
+
+msgid "5 GHz"
+msgstr "5 GHz"
+
+msgid "6 GHz"
+msgstr "6 GHz"
+
+msgid "60 GHz"
+msgstr "60 GHz"
+
+msgid "AP unavailable"
+msgstr "AP 暂不可用"
+
+msgid "Advanced settings"
+msgstr "高级设置"
+
+msgid "Allow roaming for %s"
+msgstr "允许 %s 漫游"
+
+msgid "BSSID"
+msgstr "BSSID"
+
+msgid "BSSIDs and MLO links are learned automatically. The peer must offer the same SSID."
+msgstr "自动获取和维护 BSSID 及 MLO 链路；对端须提供相同的 SSID。"
+
+msgid "Bring the selected AP online before enabling roaming assistance."
+msgstr "请先使所选 AP 恢复在线，再启用漫游辅助。"
+
+msgid "Channel"
+msgstr "信道"
+
+msgid "Could not apply neighbor reports"
+msgstr "无法应用邻居信息"
+
+msgid "Could not prepare local wireless settings."
+msgstr "无法准备本机无线设置。"
+
+msgid "Disabled"
+msgstr "已停用"
+
+msgid "Enabled"
+msgstr "已启用"
+
+msgid "IPv6 address"
+msgstr "IPv6 地址"
+
+msgid "Leave all SSIDs unchecked to exchange only station and topology information."
+msgstr "不勾选 SSID 时，仅交换站点和拓扑信息。"
+
+msgid "Local AP is unavailable"
+msgstr "本机 AP 暂不可用"
+
+msgid "Local SSID settings are ambiguous"
+msgstr "本机同名 SSID 设置存在歧义"
+
+msgid "Local assistance is disabled"
+msgstr "本机漫游辅助已停用"
+
+msgid "Local collection"
+msgstr "本机信息采集"
+
+msgid "Local wireless network"
+msgstr "本机无线网络"
+
+msgid "Local wireless networks"
+msgstr "本机无线网络"
+
+msgid "Local wireless security information is unavailable"
+msgstr "无法获取本机无线安全信息"
+
+msgid "MHz"
+msgstr "MHz"
+
+msgid "No SSIDs selected for roaming assistance."
+msgstr "尚未选择需要漫游的 SSID。"
+
+msgid "No local AP SSIDs configured."
+msgstr "本机尚未配置 AP SSID。"
+
+msgid "Peer IP and MAC do not match"
+msgstr "对端 IP 与 MAC 地址不匹配"
+
+msgid "Peer SSID settings are ambiguous"
+msgstr "对端同名 SSID 设置存在歧义"
+
+msgid "Peer automatic roaming is unavailable"
+msgstr "对端暂不支持自动 SSID 漫游"
+
+msgid "Peer neighbor reports are invalid"
+msgstr "对端邻居信息无效"
+
+msgid "Peer neighbor reports expired"
+msgstr "对端邻居信息已过期"
+
+msgid "Peer wireless identity conflicts"
+msgstr "对端无线标识冲突"
+
+msgid "Peer wireless identity conflicts with this device or another peer."
+msgstr "对端无线标识与本机或其他节点冲突。"
+
+msgid "Preparing roaming"
+msgstr "正在准备漫游"
+
+msgid "Roaming SSIDs"
+msgstr "漫游 SSID"
+
+msgid "Roaming disabled"
+msgstr "未开启漫游"
+
+msgid "Roaming enabled"
+msgstr "已开启漫游"
+
+msgid "Roaming information expired"
+msgstr "漫游信息已过期"
+
+msgid "Roaming information unavailable"
+msgstr "漫游信息暂不可用"
+
+msgid "SSID"
+msgstr "SSID"
+
+msgid "SSID roaming assistance"
+msgstr "SSID 漫游状态"
+
+msgid "SSIDs allowed for roaming"
+msgstr "允许漫游的 SSID"
+
+msgid "Save network settings"
+msgstr "保存网络设置"
+
+msgid "Select SSIDs in each peer to enable roaming assistance. The required local network settings are prepared automatically."
+msgstr "在各个对端中勾选需要漫游的 SSID，即可自动准备所需的本机网络设置。"
+
+msgid "Select an SSID configured on this device."
+msgstr "请选择本机已配置的 SSID。"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "The local wireless settings changed. Refresh the page."
+msgstr "本机无线设置已改变，请刷新页面。"
+
+msgid "The peer has not provided roaming information for this SSID"
+msgstr "对端尚未提供此 SSID 的漫游信息"
+
+msgid "This SSID already uses another local roaming controller."
+msgstr "此 SSID 已使用其他本机漫游控制器。"
+
+msgid "This SSID has multiple local AP configurations. Check the wireless settings."
+msgstr "本机有多个同名 AP 配置，请检查无线设置。"
+
+msgid "This SSID is no longer configured locally."
+msgstr "本机已不再配置此 SSID。"
+
+msgid "This device already has 17 local wireless networks configured for roaming."
+msgstr "本机已配置 17 个漫游无线网络。"
+
+msgid "Update time unavailable"
+msgstr "更新时间未知"
+
+msgid "Updated %s"
+msgstr "更新于 %s"
+
+msgid "Upgrade the peer to use automatic SSID roaming"
+msgstr "请升级对端以使用自动 SSID 漫游"
+
+msgid "Verify the peer IPv4 address and bridge MAC before saving. Discovery is unauthenticated."
+msgstr "发现信息未经身份认证，保存前请核对对端 IPv4 地址和网桥 MAC 地址。"
+
+msgid "Waiting for AP application"
+msgstr "等待 AP 应用邻居信息"
+
+msgid "Waiting for peer IP and MAC verification"
+msgstr "等待核验对端 IP 与 MAC 地址"
+
+msgid "Wireless security settings differ"
+msgstr "无线安全设置不一致"
+
+msgid "Wireless settings differ"
+msgstr "无线设置不一致"
+
+msgid "Some local settings changed, but the previous settings could not be restored. Refresh and check the settings."
+msgstr "部分本机设置已改变，但未能恢复先前的设置。请刷新并核对当前设置。"

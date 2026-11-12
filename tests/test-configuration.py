@@ -68,13 +68,16 @@ sys.exit(1 if Path({str(stage / 'service-fail')!r}).exists() else 0)
         (stage / 'mesh.uc').write_text(
             (files / 'mesh.uc').read_text()
             .replace('/tmp/wrtmesh-private/mesh', str(stage / 'state'))
+            .replace('/etc/config/', str(config) + '/')
             .replace('/tmp/wrtmesh-public/', str(stage / 'public') + '/')
             .replace('/etc/init.d/wrtmesh', str(service))
             .replace('return uci.cursor();', f"return uci.cursor('{config}', '{delta}');"))
         (stage / 'wrtmesh.uc').write_text(
             (files / 'wrtmesh.uc').read_text()
             .replace('/usr/lib/wrtmesh/mesh.uc', str(stage / 'mesh.uc'))
+            .replace('/etc/config/', str(config) + '/')
             .replace('/var/lock/wrtmesh-config.lock', str(stage / 'config.lock'))
+            .replace("if (!config.commit('wrtmesh_peers'))", "if (fs.stat('" + str(stage / 'fail-pair') + "') || !config.commit('wrtmesh_peers'))")
             .replace("from 'ubus'", f"from '{stage}/ubus.uc'"))
         (stage / 'ubus.uc').write_text(f"""
 import {{ readfile }} from 'fs';
@@ -251,6 +254,55 @@ export function error() {{ return null; }}
         embedded = json.loads(uci("print(c.get_all('wrtmesh','embedded'));"))
         assert embedded['peer_mode'] == 'fleet' and embedded['peers'] == ['peer_020000000031_1']
         assert rpc('profile_remove', id='embedded') == {'saved': True}
+        # The public GUI needs only a real SSID selection. Compatible SLO radios
+        # form one SSID, get independent hidden workers, and need no user ID/pins.
+        original_wireless = wireless.read_bytes()
+        with wireless.open('a') as stream:
+            for index in range(2):
+                stream.write(f"\nconfig wifi-iface 'auto{index}'\n option mode 'ap'\n option ssid 'Auto 家庭'\n option network ' lan '\n option encryption 'sae'\n option device 'radio{index}'\n")
+        for index in range(2):
+            bus['network.wireless:status']['radio' + str(index)]['interfaces'].append(
+                {'section': 'auto' + str(index), 'ifname': 'auto' + str(index)})
+            bus['hostapd.auto' + str(index) + ':get_status'] = {
+                'status': 'ENABLED', 'ssid': 'Auto 家庭', 'bssid': f'02:00:00:04:00:0{index}' }
+        save_bus()
+        uci("c.set('wrtmesh','retired_auto','roaming');"
+            "c.set('wrtmesh','retired_auto','managed','ssid');"
+            "c.set('wrtmesh','retired_auto','section','removed_ap');"
+            "c.set('wrtmesh','retired_auto','enabled','1'); c.commit('wrtmesh');")
+        assert rpc('peer_save', address='192.168.1.21', bridge_mac=peer_mac,
+                   name='Peer', ssids=['Auto 家庭']) == {'saved': True}
+        assert uci("print(c.get('wrtmesh','retired_auto') ?? 'missing');") == 'missing'
+        group = next(n for n in rpc('configuration')['networks'] if n['ssid'] == 'Auto 家庭')
+        assert group['enabled'] and group['sections'] == ['auto0', 'auto1']
+        assert group['security']['pmf'] == 2
+        assert len(group['profiles']) == 2
+        selected = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == peer_mac)
+        assert selected['ssids'] == ['Auto 家庭'] and selected['automatic']
+        assert selected['profiles'] == {}
+        assert selected['roaming'][0]['state'] != 'active', 'configuration alone is not an applied proof'
+        assert rpc('network_save', section='auto0', enabled=False, interval=60, ttl=180) == {'saved': True}
+        group = next(n for n in rpc('configuration')['networks'] if n['ssid'] == 'Auto 家庭')
+        assert not group['enabled'] and all(not p['enabled'] for p in group['profiles'])
+        assert rpc('network_save', section='auto1', enabled=True, interval=60, ttl=180) == {'saved': True}
+        before_files = {name: (config / name).read_bytes() for name in ('wrtmesh', 'wrtmesh_peers')}
+        for names in (['unknown'], ['Auto 家庭', 'Auto 家庭']):
+            assert rpc('peer_save', address='192.168.1.21', bridge_mac=peer_mac,
+                       name='Peer', ssids=names) == {'error': 'invalid_ssid'}
+            assert all((config / name).read_bytes() == value for name, value in before_files.items())
+        # First owned config commits, second commit fails: exact raw rollback.
+        (stage / 'fail-pair').touch()
+        assert rpc('peer_save', address='192.168.1.21', bridge_mac=peer_mac,
+                   name='Changed', ssids=['Auto 家庭']) == {'error': 'save_failed'}
+        assert all((config / name).read_bytes() == value for name, value in before_files.items())
+        (stage / 'fail-pair').unlink()
+        assert rpc('peer_save', address='192.168.1.21', bridge_mac=peer_mac,
+                   name='Peer', ssids=[]) == {'saved': True}
+        selected = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == peer_mac)
+        assert selected['ssids'] == [] and selected['profiles'] == {}
+        for item in rpc('configuration')['profiles']:
+            assert rpc('profile_remove', id=item['id']) == {'saved': True}
+        wireless.write_bytes(original_wireless)
         for index in range(17):
             assert save_profile('p' + str(index)) == {'saved': True}
         assert save_profile('overflow') == {'error': 'profile_limit'}

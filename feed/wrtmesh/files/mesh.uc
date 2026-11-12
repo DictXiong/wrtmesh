@@ -11,8 +11,12 @@ export const response_limit = 65536;
 export const cache_limit = 1048576;
 export const service = '_wrtmesh._tcp';
 
+export function clean_string(value) {
+	return type(value) == 'string' && index(value, '\x00') < 0;
+}
+
 export function mac(s) {
-	if (type(s) != 'string')
+	if (!clean_string(s) || length(s) != 17)
 		return null;
 	s = lc(s);
 	return match(s, /^[0-9a-f][02468ace](:[0-9a-f]{2}){5}$/) &&
@@ -20,7 +24,7 @@ export function mac(s) {
 }
 
 export function ipv4(s) {
-	if (type(s) != 'string' || !match(s, /^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$/))
+	if (!clean_string(s) || !match(s, /^(0|[1-9][0-9]{0,2})(\.(0|[1-9][0-9]{0,2})){3}$/))
 		return null;
 	let parts = map(split(s, '.'), part => int(part));
 	if (filter(parts, n => n > 255)[0] != null)
@@ -47,15 +51,15 @@ export function on_lan(lan, address) {
 }
 
 export function dev(s) {
-	return type(s) == 'string' && match(s, /^[a-zA-Z0-9_.-]{1,15}$/) ? s : null;
+	return clean_string(s) && match(s, /^[a-zA-Z0-9_.-]{1,15}$/) ? s : null;
 }
 
 export function profile(s) {
-	return type(s) == 'string' && match(s, /^[a-zA-Z][a-zA-Z0-9_]{0,47}$/) ? s : null;
+	return clean_string(s) && match(s, /^[a-zA-Z][a-zA-Z0-9_]{0,47}$/) ? s : null;
 }
 
 export function label(s, max) {
-	return type(s) == 'string' && length(s) <= max && !match(s, /[[:cntrl:]]/) ? s : null;
+	return clean_string(s) && length(s) <= max && !match(s, /[[:cntrl:]]/) ? s : null;
 }
 
 export function array(value) {
@@ -74,6 +78,129 @@ export function pins(raw) {
 		push(list, addr);
 	}
 	return list;
+}
+
+// These values are exact SSID bytes represented by ucode strings. Never trim,
+// case-fold or derive cross-node identity from a local UCI section name.
+export function ssid(value) {
+	return label(value, 32) && length(value) > 0 ? value : null;
+}
+
+export function ssid_list(raw) {
+	if (type(raw) != 'array' || length(raw) > 17)
+		return null;
+	let result = [];
+	for (let item in raw) {
+		if (!ssid(item) || index(result, item) >= 0)
+			return null;
+		push(result, item);
+	}
+	return result;
+}
+
+function option_number(value) {
+	return clean_string(value) && match(value, /^(0|[1-9][0-9]{0,9})$/) ? int(value) : null;
+}
+
+
+export function security(raw) {
+	if (type(raw) != 'object' ||
+	    index(['none', 'owe', 'psk', 'psk2', 'psk-mixed', 'sae', 'sae-mixed',
+	           'wpa', 'wpa2', 'wpa-mixed', 'wpa3', 'wpa3-mixed', 'wpa3-192'], raw.auth) < 0 ||
+	    type(raw.pmf) != 'int' || raw.pmf < 0 || raw.pmf > 2 || type(raw.ft) != 'bool' ||
+	    (raw.domain != null && (!clean_string(raw.domain) || !match(raw.domain, /^[0-9a-f]{4}$/))))
+		return null;
+	let cipher = raw.cipher ?? (raw.auth == 'none' ? 'none' : 'ccmp');
+	if (index(['none', 'ccmp', 'tkip', 'ccmp+tkip', 'ccmp256', 'gcmp', 'gcmp256'], cipher) < 0)
+		return null;
+	return { auth: raw.auth, cipher, pmf: raw.pmf, ft: raw.ft, domain: raw.ft ? raw.domain : null };
+}
+
+export function wireless_security(section) {
+	let pieces = type(section.encryption) == 'string' ? split(section.encryption, '+') : ['none'];
+	let auth = pieces[0];
+	if (auth == 'psk3') auth = 'sae';
+	if (auth == 'psk3-mixed') auth = 'sae-mixed';
+	let cipher = auth == 'none' ? 'none' : auth == 'wpa3-192' ? 'gcmp256' : 'ccmp';
+	if (length(pieces) > 1) {
+		let selected = sort(map(slice(pieces, 1), item => item == 'aes' ? 'ccmp' : item));
+		cipher = join('+', selected);
+	}
+	let default_pmf = index(['sae', 'owe', 'wpa3', 'wpa3-192'], auth) >= 0 ? '2' :
+		index(['sae-mixed', 'wpa3-mixed'], auth) >= 0 ? '1' : '0';
+	let pmf = option_number(section.ieee80211w ?? default_pmf);
+	let ft = section.ieee80211r == '1';
+	let domain = type(section.mobility_domain) == 'string' ? lc(section.mobility_domain) : null;
+	return security({ auth, cipher, pmf, ft, domain });
+}
+
+export function same_security(left, right) {
+	left = security(left); right = security(right);
+	return left && right && left.auth == right.auth && left.cipher == right.cipher && left.pmf == right.pmf &&
+		left.ft == right.ft && (!left.ft || !left.domain || !right.domain || left.domain == right.domain);
+}
+
+function uuid(value) {
+	return clean_string(value) && match(value, /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+}
+
+export function neighbor_report(raw, network) {
+	let bssid = mac(raw?.bssid), nr = raw?.nr;
+	if (!bssid || raw.ssid != network || !clean_string(nr) ||
+	    length(nr) < 26 || length(nr) > 510 || !match(nr, /^[0-9a-f]+$/) || length(nr) % 2 ||
+	    substr(nr, 0, 12) != replace(bssid, /:/g, '') ||
+	    int(substr(nr, 20, 2), 16) == 0 || int(substr(nr, 22, 2), 16) == 0)
+		return null;
+	let offset = 26;
+	while (offset < length(nr)) {
+		if (length(nr) - offset < 4)
+			return null;
+		let size = int(substr(nr, offset + 2, 2), 16);
+		offset += 4 + size * 2;
+		if (offset > length(nr))
+			return null;
+	}
+	return { bssid, ssid: network, nr };
+}
+
+export function report_envelope(raw, addr, network) {
+	if (raw?.version != 1 || raw.bridge_mac != addr || raw.ssid != network ||
+	    !uuid(raw.revision) || type(raw.reports) != 'array' ||
+	    length(raw.reports) < 1 || length(raw.reports) > 3)
+		return null;
+	let reports = [], seen = {};
+	for (let item in raw.reports) {
+		let row = neighbor_report(item, network);
+		if (!row || seen[row.bssid])
+			return null;
+		seen[row.bssid] = true;
+		push(reports, row);
+	}
+	return { version: 1, bridge_mac: addr, ssid: network, revision: raw.revision, reports };
+}
+
+export function peer_binding(rows, lan, peer) {
+	if (!on_lan(lan, peer.address))
+		return 'unknown';
+	let addresses = {};
+	for (let row in array(rows)) {
+		if (row?.dst == peer.address && row.dev == lan.device &&
+		    type(row.state) == 'int' && (row.state & 0xde) && !(row.state & 0x21)) {
+			let address = mac(row.lladdr);
+			if (address)
+				addresses[address] = true;
+		}
+	}
+	let found = keys(addresses);
+	return length(found) == 0 ? 'unknown' :
+		length(found) == 1 && found[0] == peer.bridge_mac ? 'verified' : 'mismatch';
+}
+
+export function profile_state(id) {
+	if (!profile(id))
+		return null;
+	return '/tmp/wrtmesh-private' + (id == 'main' ? '' :
+		index(['guest', 'iot', 'battalion'], id) >= 0 ? '/' + id : '/profile-' + id);
 }
 
 export function uptime() {
@@ -125,11 +252,11 @@ export function profiles(cursor, include_disabled) {
 }
 
 export function section_id(value) {
-	return type(value) == 'string' && match(value, /^[A-Za-z0-9_]{1,64}$/) ? value : null;
+	return clean_string(value) && match(value, /^[A-Za-z0-9_]{1,64}$/) ? value : null;
 }
 
 export function profile_metadata(iface, mlo, max_links) {
-	return type(iface) == 'string' && match(iface, /^[A-Za-z][A-Za-z0-9_.-]{0,14}$/) &&
+	return clean_string(iface) && match(iface, /^[A-Za-z][A-Za-z0-9_.-]{0,14}$/) &&
 		type(mlo) == 'bool' && type(max_links) == 'int' && max_links >= 1 && max_links <= 3 &&
 		(mlo || max_links == 1) ? { iface, mlo, max_links } : null;
 }
@@ -139,8 +266,18 @@ export function profile_timers(interval, ttl) {
 		type(ttl) == 'int' && ttl >= 180 && ttl <= 1800 && ttl >= interval * 3;
 }
 
-function option_number(value) {
-	return type(value) == 'string' && match(value, /^(0|[1-9][0-9]{0,9})$/) ? int(value) : null;
+
+function network_membership(raw) {
+	let names = {};
+	for (let name in type(raw) == 'string' ? split(raw, /[[:space:]]+/) : array(raw))
+		if (type(name) == 'string' && length(name)) names[name] = true;
+	return sort(keys(names));
+}
+
+function section_disabled(cursor, section) {
+	if (section.disabled == '1') return true;
+	let devices = type(section.device) == 'string' ? filter(split(section.device, /[[:space:]]+/), length) : array(section.device);
+	return length(devices) && length(filter(devices, name => cursor.get('wireless', name, 'disabled') != '1')) == 0;
 }
 
 export function local_ssids(cursor, bus) {
@@ -191,12 +328,13 @@ export function local_ssids(cursor, bus) {
 		let metadata = profile_metadata(iface, mlo, max_links);
 		let reason = !section_id(section) || !length(ssid) ? 'invalid_profile_section' :
 			length(names) > 1 ? 'profile_runtime_ambiguous' :
-			s.disabled == '1' || !available ? 'profile_runtime_unavailable' :
+			section_disabled(cursor, s) || !available ? 'profile_runtime_unavailable' :
 			status.ssid != ssid || (s.mlo == '1' && !mlo) ? 'profile_runtime_mismatch' :
 			!metadata ? 'profile_metadata_unsupported' : null;
-		push(result, { section, ssid, devices, disabled: s.disabled == '1', available,
+		push(result, { section, ssid, devices, disabled: !!section_disabled(cursor, s), available,
 			supported: reason == null, reason, iface, mlo, max_links, links,
-			bssid: mac(status.bssid) ?? mac(s.macaddr) });
+			bssid: mac(status.bssid) ?? mac(s.macaddr), security: wireless_security(s),
+			service_network: network_membership(s.network) });
 	});
 	return result;
 }
@@ -252,6 +390,142 @@ export function local_profiles(cursor, ssids) {
 	return result;
 }
 
+// Several non-MLO BSSes may represent one ESS on different radios. Only a
+// matching local service network and security summary allow that grouping.
+export function local_networks(cursor, bus) {
+	let ssids = local_ssids(cursor, bus);
+	let configured = local_profiles(cursor, ssids);
+	ssids = filter(ssids, item => !item.disabled || !length(filter(ssids, other => other.ssid == item.ssid && !other.disabled)));
+	let groups = {}, result = [];
+	for (let item in ssids) {
+		let token = sprintf('%J', [item.service_network, item.security]);
+		let group = groups[item.ssid] ??= { ssid: item.ssid, section: item.section,
+			sections: [], members: [], profiles: [], token, ambiguous: false };
+		group.ambiguous ||= group.token != token;
+		push(group.sections, item.section);
+		push(group.members, item);
+		for (let profile in configured)
+			if (profile.section == item.section)
+				push(group.profiles, profile);
+	}
+	for (let group in values(groups)) {
+		let controllers = {}, available = true, supported = true, selected = true, max_links = 0;
+		for (let item in group.members) {
+			available &&= item.available;
+			max_links += item.max_links;
+			supported &&= item.supported && item.security != null;
+			if (item.iface)
+				controllers[item.iface] = true;
+			selected &&= length(filter(group.profiles, p => p.section == item.section && p.enabled)) > 0;
+		}
+		let first = group.members[0], configured = group.profiles[0];
+		push(result, { ssid: group.ssid, section: group.section, sections: group.sections,
+			members: group.members, profiles: group.profiles, enabled: selected,
+			available, supported: supported && !group.ambiguous,
+			reason: group.ambiguous ? 'local_ambiguous' :
+				!first.security ? 'local_security_unknown' :
+				!available ? 'local_unavailable' : !supported ? 'local_unavailable' : null,
+			security: first.security, mlo: length(group.members) == 1 && first.mlo,
+			max_links: min(3, max_links),
+			interval: configured?.interval ?? 30, ttl: configured?.ttl ?? 180 });
+	}
+	return result;
+}
+
+export function configured_networks(cursor) {
+	let networks = {}, by_section = {}, active_names = {};
+	cursor.foreach('wireless', 'wifi-iface', s => {
+		if (s.mode == 'ap' && ssid(s.ssid) && !section_disabled(cursor, s)) active_names[s.ssid] = true;
+	});
+	cursor.foreach('wireless', 'wifi-iface', s => {
+		if (s.mode != 'ap' || !ssid(s.ssid) || (active_names[s.ssid] && section_disabled(cursor, s)))
+			return;
+		let mode = wireless_security(s);
+		let members = network_membership(s.network);
+		let token = sprintf('%J', [members, mode]);
+		let item = networks[s.ssid] ??= { ssid: s.ssid, sections: [], profiles: [],
+			security: mode, token, ambiguous: false };
+		item.ambiguous ||= item.token != token;
+		push(item.sections, s['.name']);
+		by_section[s['.name']] = item;
+	});
+	cursor.foreach('wrtmesh', 'roaming', s => {
+		let item = by_section[s.section];
+		if (!item && s['.name'] == 'main' && ssid(s.ssid))
+			item = networks[s.ssid];
+		if (item && profile(s['.name']))
+			push(item.profiles, { id: s['.name'], section: s.section, enabled: s.enabled == '1',
+				iface: s.iface, interval: option_number(s.interval) ?? 30, ttl: option_number(s.ttl) ?? 180 });
+	});
+	return values(networks);
+}
+
+export function worker_status(id, now) {
+	let directory = profile_state(id);
+	let value = directory ? read_json(directory + '/status.json', 65536) : null;
+	let elapsed = type(value?.sampled_uptime) == 'int' ? now - value.sampled_uptime : null;
+	if (value?.version != 3 || value.profile != id || elapsed == null || elapsed < 0 ||
+	    type(value.interval_seconds) != 'int' || value.interval_seconds < 30 ||
+	    value.interval_seconds > 300 || elapsed >= value.interval_seconds * 3 ||
+	    index(['ok', 'degraded'], value.state) < 0)
+		return null;
+	return value;
+}
+
+export function local_roaming(cursor, bus, addr, now) {
+	let result = [];
+	for (let network in local_networks(cursor, bus)) {
+		if (!network.enabled || !network.supported)
+			continue;
+		let parts = [], reports = {}, valid = true;
+		for (let p in network.profiles) {
+			if (!p.enabled)
+				continue;
+			let status = worker_status(p.id, now);
+			let envelope = report_envelope(read_json('/tmp/wrtmesh-public/' +
+				(p.id == 'main' ? '' : p.id + '/') + 'own.json', 16384), addr, network.ssid);
+			if (!status || status.ssid != network.ssid || !envelope ||
+			    !clean_string(status.own_digest) || !match(status.own_digest, /^[0-9a-f]{64}$/)) {
+				valid = false;
+				break;
+			}
+			for (let report in envelope.reports) {
+				if (reports[report.bssid])
+					valid = false;
+				reports[report.bssid] = true;
+			}
+			push(parts, { source: p.id, envelope, digest: status.own_digest,
+				age: now - status.sampled_uptime, ttl: max(ttl, min(900, status.interval_seconds * 3)) });
+		}
+		if (valid && length(parts) && length(reports) <= 3)
+			push(result, { ssid: network.ssid, security: network.security, parts });
+	}
+	return result;
+}
+
+export function roaming_network(raw, addr) {
+	let network = ssid(raw?.ssid), mode = security(raw?.security);
+	if (!network || !mode || type(raw.parts) != 'array' || length(raw.parts) < 1 || length(raw.parts) > 3)
+		return null;
+	let parts = [], bssids = {}, sources = {};
+	for (let item in raw.parts) {
+		let envelope = report_envelope(item?.envelope, addr, network);
+		if (!profile(item?.source) || sources[item.source] || !envelope ||
+		    !clean_string(item.digest) || !match(item.digest, /^[0-9a-f]{64}$/) ||
+		    type(item.ttl ?? ttl) != 'int' || (item.ttl ?? ttl) < ttl || (item.ttl ?? ttl) > 900 ||
+		    type(item.age) != 'int' || item.age < 0 || item.age >= (item.ttl ?? ttl))
+			return null;
+		sources[item.source] = true;
+		for (let report in envelope.reports) {
+			if (bssids[report.bssid])
+				return null;
+			bssids[report.bssid] = true;
+		}
+		push(parts, { source: item.source, envelope, digest: item.digest, age: item.age, ttl: item.ttl ?? ttl });
+	}
+	return length(bssids) <= 3 ? { ssid: network, security: mode, parts } : null;
+}
+
 export function reconcile() {
 	try {
 		return system(['/etc/init.d/wrtmesh', 'reload'], 20000) == 0;
@@ -267,7 +541,8 @@ export function overrides(cursor) {
 		if (!addr || s['.name'] != peer_key(addr))
 			return;
 		let p = { bridge_mac: addr, address: s.address, name: label(s.name, 64) || '',
-			disabled: s.disabled == '1', profiles: {} };
+			disabled: s.disabled == '1', profiles: {}, automatic: s.ssid_mode == 'auto',
+			ssids: ssid_list(type(s.roam_ssid) == 'string' ? [s.roam_ssid] : s.roam_ssid ?? []) ?? [] };
 		for (let option, raw in s) {
 			let m = match(option, /^([a-zA-Z][a-zA-Z0-9_]{0,47})_bssid$/);
 			let list = m ? pins(raw) : null;
@@ -319,12 +594,22 @@ export function peer_inventory(cursor, overlay) {
 	return { legacy, peers };
 }
 
-export function advertised_profiles(cursor, addr) {
+export function selected_ssids(peer, networks) {
+	if (peer.automatic)
+		return peer.ssids ?? [];
+	let result = [];
+	for (let item in networks)
+		if (length(filter(item.profiles, p => length(peer.profiles[p.id] ?? []))))
+			push(result, item.ssid);
+	return result;
+}
+
+export function advertised_profiles(cursor, addr, any_local_identity) {
 	let result = {};
 	for (let id in keys(profiles(cursor))) {
 		let path = '/tmp/wrtmesh-public/' + (id == 'main' ? '' : id + '/') + 'own.json';
 		let own = read_json(path, 16384);
-		if (own?.version != 1 || own.bridge_mac != addr || !array(own.reports)[0])
+		if (own?.version != 1 || (!any_local_identity && own.bridge_mac != addr) || !array(own.reports)[0])
 			continue;
 		let list = pins(map(own.reports, r => r?.bssid));
 		if (list)
@@ -332,6 +617,238 @@ export function advertised_profiles(cursor, addr) {
 	}
 	return result;
 }
+
+
+// No ubus/hostapd sampling on the worker cache-reader path.
+export function local_profile_bssids_from_public(cursor) {
+	return advertised_profiles(cursor, null, true);
+}
+
+
+export function roaming_overlay(cursor, id, now, existing_cache, known_own) {
+	let networks = configured_networks(cursor), target;
+	for (let network in networks)
+		if (length(filter(network.profiles, p => p.id == id)))
+			target = network;
+	let overlays = overrides(cursor);
+	let cache = existing_cache ?? read_json(state + '/peers.json', cache_limit) ?? {};
+	let own = {};
+	for (let names in values(known_own ?? local_profile_bssids_from_public(cursor)))
+		for (let address in names)
+			own[address] = true;
+	let result = [];
+	for (let addr, p in overlays) {
+		if (!p.automatic) {
+			push(result, { id: peer_key(addr), bridge_mac: addr, address: p.address,
+				bssids: p.profiles[id] ?? [], disabled: p.disabled });
+			continue;
+		}
+		let selected = target && index(p.ssids, target.ssid) >= 0;
+		let item = { id: peer_key(addr), address: p.address, bridge_mac: addr,
+			auto: true, disabled: p.disabled || !selected, bssids: [], reason: 'not_selected', parts: [] };
+		if (item.disabled) {
+			push(result, item);
+			continue;
+		}
+		let entry = cache[addr]?.address == p.address ? cache[addr] : null;
+		let elapsed = type(entry?.seen) == 'int' && now >= entry.seen ? now - entry.seen : null;
+		item.revision = entry?.revision;
+		item.reason = target.ambiguous ? 'local_ambiguous' : !target.security ? 'local_security_unknown' :
+			entry?.identity == 'mismatch' ? 'identity_mismatch' : entry?.identity != 'verified' ? 'identity_pending' :
+			!entry ? 'peer_unavailable' : entry.status == 'unreachable' ? 'peer_unreachable' :
+			entry.status == 'forbidden' ? 'peer_forbidden' :
+			entry.status != 'fresh' ? 'peer_' + (entry.status == 'stale' ? 'stale' : 'unavailable') :
+			elapsed == null || elapsed >= ttl ? 'peer_stale' :
+			entry.data?.roaming == null ? 'peer_upgrade_required' : 'ready';
+		if (item.reason == 'ready') {
+			let matches = filter(entry.data.roaming, network => network.ssid == target.ssid);
+			let network = matches[0];
+			if (length(matches) > 1)
+				item.reason = 'peer_ambiguous';
+			else if (!network)
+				item.reason = 'peer_ssid_missing';
+			else if (!same_security(target.security, network.security))
+				item.reason = 'peer_security_mismatch';
+			else {
+				for (let part in network.parts) {
+					let seen = entry.seen - part.age, lifetime = part.ttl ?? ttl;
+					let anchor = entry.report_seen?.[target.ssid]?.[part.source];
+					if (anchor?.revision == part.envelope.revision) {
+						seen = min(seen, anchor.seen);
+						lifetime = min(lifetime, anchor.ttl ?? ttl);
+					}
+					if (now < seen || now - seen >= lifetime)
+						item.reason = 'peer_reports_stale';
+					for (let row in part.envelope.reports)
+						if (own[row.bssid])
+							item.reason = 'bssid_collision';
+					push(item.parts, { source: part.source, envelope: part.envelope, digest: part.digest, seen, ttl: lifetime });
+				}
+			}
+		}
+		if (item.reason != 'ready')
+			item.parts = [];
+		push(result, item);
+	}
+	let owners = {};
+	for (let p in result)
+		if (p.auto && p.reason == 'ready')
+			for (let part in p.parts)
+				for (let row in part.envelope.reports) {
+					if (owners[row.bssid] && owners[row.bssid] !== p) {
+						p.reason = owners[row.bssid].reason = 'bssid_collision';
+					} else {
+						owners[row.bssid] = p;
+					}
+				}
+	for (let p in result)
+		if (p.auto && p.reason != 'ready')
+			p.parts = [];
+	return result;
+}
+
+
+// Retain a bounded history across temporary omission as well as HTTP failure.
+// A live observer heartbeat cannot restart an unchanged report generation's age.
+function row_state(reason) {
+	if (reason == 'ready') return 'active';
+	if (index(['not_selected', 'local_disabled'], reason) >= 0) return 'disabled';
+	if (index(['peer_stale', 'peer_reports_stale'], reason) >= 0) return 'stale';
+	if (index(['identity_mismatch', 'peer_security_mismatch', 'peer_ambiguous', 'local_ambiguous', 'bssid_collision'], reason) >= 0) return 'mismatch';
+	if (index(['peer_upgrade_required', 'local_security_unknown'], reason) >= 0) return 'unsupported';
+	if (reason == 'apply_failed') return 'error';
+	if (index(['peer_unreachable', 'peer_forbidden', 'peer_unavailable', 'local_unavailable'], reason) >= 0) return 'unavailable';
+	return 'pending';
+}
+
+export function roaming_status(cursor, peers, cache, now, wall) {
+	let networks = configured_networks(cursor), workers = {}, raw_workers = {}, overlays = {};
+	let own = local_profile_bssids_from_public(cursor);
+	for (let network in networks)
+		for (let p in network.profiles) {
+			workers[p.id] = worker_status(p.id, now);
+			raw_workers[p.id] = read_json(profile_state(p.id) + '/status.json', 65536);
+			if (length(filter(peers, peer => peer.automatic && index(peer.ssids ?? [], network.ssid) >= 0)))
+				overlays[p.id] = roaming_overlay(cursor, p.id, now, cache, own);
+		}
+	for (let peer in peers) {
+		peer.ssids = selected_ssids(peer, networks);
+		peer.roaming = [];
+		for (let name in peer.ssids) {
+			let network = filter(networks, n => n.ssid == name)[0];
+			let enabled = filter(network?.profiles ?? [], p => p.enabled);
+			let row = { ssid: name, state: 'pending', reason: 'awaiting_apply', local_applied: false,
+				age: peer.age, updated_at: peer.updated_at, bssid_count: 0 };
+			let reason = !network ? 'local_unavailable' : network.ambiguous ? 'local_ambiguous' :
+				!length(enabled) || length(enabled) < length(network.sections) ? 'local_disabled' :
+				!network.security ? 'local_security_unknown' : 'ready';
+			let bssids = {};
+			if (reason == 'ready' && peer.automatic) {
+				if (peer.status != 'fresh')
+					reason = peer.status == 'stale' ? 'peer_stale' : peer.status == 'unreachable' ? 'peer_unreachable' :
+						peer.status == 'forbidden' ? 'peer_forbidden' : 'peer_unavailable';
+				for (let p in enabled) {
+					if (reason != 'ready') break;
+					let overlay = filter(overlays[p.id] ?? [], item => item.bridge_mac == peer.bridge_mac)[0];
+					if (!overlay || overlay.reason != 'ready') {
+						reason = overlay?.reason ?? 'awaiting_apply';
+						break;
+					}
+					let digests = sort(map(overlay.parts, part => part.digest));
+					let expected = [];
+					for (let part in overlay.parts) {
+						row.age = max(row.age ?? 0, now - part.seen);
+						for (let report in part.envelope.reports) {
+							push(expected, report.bssid);
+							bssids[report.bssid] = true;
+						}
+					}
+					let worker = workers[p.id], raw = raw_workers[p.id];
+					if (!worker || worker.ssid != name) {
+						reason = raw?.state == 'error' && match(raw.reason ?? '', /^apply_/) ? 'apply_failed' : 'local_unavailable';
+						break;
+					}
+					row.age = max(row.age ?? 0, now - worker.sampled_uptime);
+					let proof = filter(array(worker.applied_peers), item => item.bridge_mac == peer.bridge_mac && item.address == peer.address)[0];
+					if (!proof?.applied || sprintf('%J', sort(array(proof.digests))) != sprintf('%J', digests) ||
+					    sprintf('%J', sort(array(proof.bssids))) != sprintf('%J', sort(expected)))
+						reason = 'awaiting_apply';
+				}
+			} else if (reason == 'ready') {
+				// Earlier pinned peers keep their strict v1 path and are proved
+				// from the same worker's actually applied request, without claiming
+				// the new automatic BSSID discovery protocol is available there.
+				for (let p in enabled) {
+					let worker = workers[p.id], raw = raw_workers[p.id];
+					if (!worker || worker.ssid != name) {
+						reason = raw?.state == 'error' && match(raw.reason ?? '', /^apply_/) ? 'apply_failed' : 'local_unavailable';
+						break;
+					}
+					let proof = filter(array(worker.applied_peers), item => item.bridge_mac == peer.bridge_mac && item.address == peer.address)[0];
+					let allowed = peer.profiles[p.id] ?? [];
+					if (!proof?.applied || !length(array(proof.bssids)) ||
+					    length(filter(proof.bssids, value => index(allowed, value) < 0))) {
+						reason = 'awaiting_apply';
+						break;
+					}
+					for (let value in proof.bssids) bssids[value] = true;
+					row.age = max(row.age ?? 0, now - worker.sampled_uptime);
+				}
+			}
+			row.reason = reason;
+			row.state = row_state(reason);
+			row.local_applied = reason == 'ready';
+			row.updated_at = row.age == null ? null : wall - row.age;
+			row.bssid_count = length(bssids);
+			push(peer.roaming, row);
+		}
+	}
+	return peers;
+}
+
+export function report_anchors(previous, snapshot, now) {
+	let anchors = {}, count = 0, valid = true;
+	for (let network in snapshot.roaming ?? []) {
+		anchors[network.ssid] = {};
+		for (let part in network.parts) {
+			let before = previous?.[network.ssid]?.[part.source];
+			let seen = now - (snapshot.sample_age ?? 0) - part.age, lifetime = part.ttl ?? ttl;
+			if (before?.revision == part.envelope.revision) {
+				if (before.digest != part.digest) valid = false;
+				seen = min(seen, before.seen);
+				lifetime = min(lifetime, before.ttl ?? ttl);
+			}
+			anchors[network.ssid][part.source] = { revision: part.envelope.revision,
+				digest: part.digest, seen, ttl: lifetime };
+			count++;
+		}
+	}
+	let retained = [];
+	for (let name, sources in previous ?? {})
+		for (let source, value in sources)
+			if (!anchors[name]?.[source]) push(retained, { name, source, value });
+	sort(retained, (a,b) => b.value.seen - a.value.seen);
+	for (let old in retained) {
+		if (count++ >= 32) break;
+		anchors[old.name] ??= {};
+		anchors[old.name][old.source] = old.value;
+	}
+	return { anchors, valid };
+}
+
+export function roaming_conflict(previous, candidate) {
+	for (let network in candidate?.roaming ?? []) {
+		let old = filter(previous?.roaming ?? [], item => item.ssid == network.ssid)[0];
+		for (let part in network.parts) {
+			let before = filter(old?.parts ?? [], item => item.source == part.source)[0];
+			if (before?.envelope.revision == part.envelope.revision &&
+			    (sprintf('%J', before.envelope) != sprintf('%J', part.envelope) || before.digest != part.digest))
+				return true;
+		}
+	}
+	return false;
+}
+
 
 export function local_profile_bssids(cursor, bus) {
 	let result = advertised_profiles(cursor, identity(bus).bridge_mac);
@@ -501,7 +1018,7 @@ export function merge_station(existing, candidate) {
 // Keep the v1 HTTP body, local wrapper and 15-peer cache below their existing
 // limits even when every client includes a hostname and several links.
 export function bounded_snapshot(snapshot) {
-	let budget = response_limit - 4096 - length(sprintf('%J', { ...snapshot, stations: [] }));
+	let budget = response_limit - 8192 - length(sprintf('%J', { ...snapshot, stations: [] }));
 	let kept = [];
 	for (let sta in snapshot.stations) {
 		budget -= length(sprintf('%J', sta)) + 2;
@@ -514,13 +1031,36 @@ export function bounded_snapshot(snapshot) {
 
 export function snapshot(raw, addr) {
 	if (raw?.version != 1 || raw.bridge_mac != addr ||
-	    type(raw.revision) != 'string' ||
+	    !clean_string(raw.revision) ||
 	    !match(raw.revision, /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/) ||
 	    (raw.sample_age != null && valid_int(raw.sample_age, 0, ttl - 1) == null) ||
 	    type(raw.stations) != 'array' || length(raw.stations) > 256 ||
 	    type(raw.paths) != 'object' || length(raw.paths) > limit)
 		return null;
-	let stations = {}, paths = {};
+	let stations = {}, paths = {}, roaming = null;
+	if (raw.roaming != null) {
+		if (type(raw.roaming) != 'array' || length(raw.roaming) > 17)
+			return null;
+		roaming = [];
+		let names = {}, sources = {}, report_owners = {}, part_count = 0;
+		for (let item in raw.roaming) {
+			let network = roaming_network(item, addr);
+			if (!network || names[network.ssid])
+				return null;
+			names[network.ssid] = true;
+			for (let part in network.parts) {
+				if (sources[part.source] || ++part_count > 17)
+					return null;
+				sources[part.source] = true;
+				for (let row in part.envelope.reports) {
+					if (report_owners[row.bssid])
+						return null;
+					report_owners[row.bssid] = true;
+				}
+			}
+			push(roaming, network);
+		}
+	}
 	for (let item in raw.stations) {
 		let s = station(item);
 		if (!s)
@@ -535,6 +1075,7 @@ export function snapshot(raw, addr) {
 	let gateway = raw.gateway;
 	return bounded_snapshot({ version: 1, bridge_mac: addr, name: label(raw.name, 64) || '',
 		revision: raw.revision, stations: values(stations), truncated: raw.truncated === true,
+		...(roaming != null ? { roaming } : {}),
 		sample_age: valid_int(raw.sample_age, 0, ttl - 1),
 		paths, gateway: ipv4(gateway?.address) ?
 			{ address: gateway.address, mac: mac(gateway.mac), ...path(gateway) } : null });

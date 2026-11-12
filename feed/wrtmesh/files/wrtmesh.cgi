@@ -26,7 +26,8 @@ if (!node.bridge_mac)
 	reply('503 Service Unavailable', {});
 
 if (query == 'identity=1')
-	reply('200 OK', { version: 1, ...node, profiles: mesh.advertised_profiles(config, node.bridge_mac) });
+	reply('200 OK', { version: 1, ...node, profiles: mesh.advertised_profiles(config, node.bridge_mac),
+		available_ssids: slice(map(mesh.configured_networks(config), network => network.ssid), 0, 17) });
 
 let peers = mesh.peer_inventory(config, mesh.overrides(config)).peers;
 if (!length(filter(peers, p => p.address == remote && p.bridge_mac != node.bridge_mac)))

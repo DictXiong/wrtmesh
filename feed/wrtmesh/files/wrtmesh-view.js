@@ -4,20 +4,18 @@
 'require poll';
 'require ui';
 'require wrtmesh';
+'require network';
 
 const discover = rpc.declare({ object: 'wrtmesh', method: 'discover' });
 const scan = rpc.declare({ object: 'wrtmesh', method: 'scan' });
 const identify = rpc.declare({ object: 'wrtmesh', method: 'identify', params: ['address'] });
 const savePeer = rpc.declare({
-	object: 'wrtmesh', method: 'save', params: ['address', 'bridge_mac', 'name', 'profiles']
+	object: 'wrtmesh', method: 'peer_save', params: ['address', 'bridge_mac', 'name', 'ssids'], raise: true
 });
 const removePeer = rpc.declare({ object: 'wrtmesh', method: 'remove', params: ['bridge_mac'] });
 const getConfiguration = rpc.declare({ object: 'wrtmesh', method: 'configuration', raise: true });
-const saveProfile = rpc.declare({
-	object: 'wrtmesh', method: 'profile_save', params: ['id', 'section', 'enabled', 'interval', 'ttl'], raise: true
-});
-const removeProfile = rpc.declare({
-	object: 'wrtmesh', method: 'profile_remove', params: ['id'], raise: true
+const saveNetwork = rpc.declare({
+	object: 'wrtmesh', method: 'network_save', params: ['section', 'enabled', 'interval', 'ttl'], raise: true
 });
 const access = rpc.declare({
 	object: 'session', method: 'access', params: ['scope', 'object', 'function'], expect: { access: false }
@@ -25,7 +23,7 @@ const access = rpc.declare({
 
 async function loadConfiguration() {
 	const data = await L.resolveDefault(getConfiguration(), null);
-	if (data && Array.isArray(data.profiles) && Array.isArray(data.ssids))
+	if (data && (Array.isArray(data.networks) || (Array.isArray(data.profiles) && Array.isArray(data.ssids))))
 		return { data };
 	const allowed = await L.resolveDefault(access('ubus', 'wrtmesh', 'configuration'), null);
 	return { error: allowed === false ? 'forbidden' : 'unavailable' };
@@ -38,23 +36,25 @@ function result(response) {
 		invalid_peer: _('Enter a unicast bridge MAC and a peer IPv4 address on the LAN subnet.'),
 		peer_limit: _('This device already has 15 peers.'),
 		duplicate_address: _('This address is already used by another peer.'),
-		invalid_bssid: _('Enter up to three distinct unicast BSSIDs for each roaming profile.'),
-		duplicate_bssid: _('A BSSID is already used by this device or another peer on this profile.'),
+		invalid_ssid: _('Select an SSID configured on this device.'),
+		ambiguous_ssid: _('This SSID has multiple local AP configurations. Check the wireless settings.'),
+		duplicate_bssid: _('Peer wireless identity conflicts with this device or another peer.'),
 		save_failed: _('Could not save the local Mesh settings.'),
+		rollback_failed: _('Some local settings changed, but the previous settings could not be restored. Refresh and check the settings.'),
 		identity_unavailable: _('The peer did not return a valid Mesh identity. You can enter its details manually.'),
 		lan_unavailable: _('The management LAN is unavailable.'),
 		discovery_unavailable: _('The mDNS discovery service is unavailable.'),
-		invalid_profile_id: _('Use a profile ID starting with a letter, followed by up to 47 letters, digits or underscores.'),
-		profile_limit: _('This device already has 17 local roaming profiles.'),
-		profile_not_found: _('This local roaming profile no longer exists. Refresh the page.'),
+		invalid_profile_id: _('Could not prepare local wireless settings.'),
+		profile_limit: _('This device already has 17 local wireless networks configured for roaming.'),
+		profile_not_found: _('The local wireless settings changed. Refresh the page.'),
 		invalid_profile_section: _('Select a local AP SSID.'),
 		invalid_profile_enabled: _('Choose whether roaming assistance is enabled for this local SSID.'),
-		profile_runtime_unavailable: _('The selected AP is unavailable. Save the profile disabled or bring the AP online.'),
+		profile_runtime_unavailable: _('Bring the selected AP online before enabling roaming assistance.'),
 		profile_runtime_ambiguous: _('The selected SSID has an ambiguous AP interface. Check its wireless configuration.'),
 		profile_runtime_mismatch: _('The AP interface changed. Refresh the page and select the local SSID again.'),
 		profile_metadata_unsupported: _('This AP interface is not supported for roaming assistance.'),
 		invalid_profile_timers: _('Use a check interval from 30 to 300 seconds and an expiry from 180 to 1800 seconds, at least three times the interval.'),
-		duplicate_profile_section: _('This local SSID is already selected by another roaming profile.'),
+		duplicate_profile_section: _('This SSID already uses another local roaming controller.'),
 		config_busy: _('Another configuration edit is in progress. Apply or discard the pending wrtmesh changes before retrying.'),
 		service_reload_failed: _('Settings were saved, but the roaming service could not reload. Check the service status.')
 	};
@@ -64,7 +64,7 @@ function result(response) {
 }
 
 function input(type, value, attributes) {
-	return E('input', { type, value: value || '', class: 'cbi-input-text', ...attributes });
+	return E('input', { type, value: value || '', class: type === 'checkbox' ? 'cbi-input-checkbox' : 'cbi-input-text', ...attributes });
 }
 
 function field(label, element) {
@@ -93,13 +93,17 @@ return view.extend({
 	handleSave: null,
 	handleReset: null,
 
-	load() {
-		return Promise.all([
+	async load() {
+		const values = await Promise.all([
 			wrtmesh.loadStatus(),
-			L.resolveDefault(access('ubus', 'wrtmesh', 'save'), false),
+			L.resolveDefault(access('ubus', 'wrtmesh', 'peer_save'), false),
 			loadConfiguration(),
-			L.resolveDefault(access('ubus', 'wrtmesh', 'profile_save'), false)
+			L.resolveDefault(access('ubus', 'wrtmesh', 'network_save'), false)
 		]);
+		const data = values[0];
+		const hasClients = data?.local?.stations?.length || data?.peers?.some(peer => peer.data?.stations?.length);
+		this.hostHints = hasClients ? await L.resolveDefault(network.getHostHints(), null) : null;
+		return values;
 	},
 
 	notify(error) {
@@ -127,122 +131,119 @@ return view.extend({
 		this.content.replaceChildren(this.sections(data));
 	},
 
-	profileLabel(id) {
-		const profile = this.configuration?.profiles?.find(profile => profile.id === id);
-		return profile?.ssid ? '%s (%s)'.format(profile.ssid, id) : id;
+	networks() {
+		if (Array.isArray(this.configuration?.networks))
+			return this.configuration.networks;
+		return (this.configuration?.ssids || []).map(network => ({
+			...network,
+			...(this.configuration?.profiles?.find(profile => profile.section === network.section) || {})
+		}));
 	},
 
-	profileEditor(profile) {
-		const choices = this.configuration?.ssids || [];
+	networkEditor(network) {
 		const limits = this.configuration?.limits || {};
-		const id = input('text', profile?.id, {
-			required: '', maxlength: 48, pattern: '[A-Za-z][A-Za-z0-9_]{0,47}',
-			readonly: profile ? '' : null
-		});
-		const section = E('select', { class: 'cbi-input-select', required: '' }, [
-			E('option', { value: '' }, [_('Select a local AP SSID')]),
-			...choices.map(choice => E('option', { value: choice.section }, [
-				choice.ssid || _('SSID unavailable'), ' (', choice.section, ')'
-			])),
-			profile?.section && !choices.some(choice => choice.section === profile.section)
-				? E('option', { value: profile.section }, [_('SSID unavailable'), ' (', profile.section, ')']) : null
-		]);
-		section.value = profile?.section || '';
-		const enabled = input('checkbox', '', { checked: profile?.enabled ? '' : null });
-		const interval = input('number', profile?.interval ?? limits.interval?.default ?? 30, {
+		const enabled = input('checkbox', '', { checked: network.enabled ? '' : null });
+		const interval = input('number', network.interval ?? limits.interval?.default ?? 30, {
 			required: '', min: limits.interval?.min ?? 30, max: limits.interval?.max ?? 300, step: 1
 		});
-		const ttl = input('number', profile?.ttl ?? limits.ttl?.default ?? 180, {
+		const ttl = input('number', network.ttl ?? limits.ttl?.default ?? 180, {
 			required: '', min: limits.ttl?.min ?? 180, max: limits.ttl?.max ?? 1800, step: 1
 		});
-		const detected = E('p', { class: 'cbi-section-descr wrtmesh-profile-runtime' });
-		const updateDetected = () => {
-			const choice = choices.find(choice => choice.section === section.value);
-			detected.textContent = !choice ? _('Select a local AP SSID') :
-				choice.supported === false ? _('This AP interface is not supported for roaming assistance.') :
-				!choice.available ? _('This AP is currently unavailable. Disabled profile settings can still be saved.') :
-				choice.mlo ? _('Detected MLO with up to %d links.').format(choice.max_links) :
-				_('Detected a single-link AP.');
-		};
-		section.addEventListener('change', updateDetected);
-		updateDetected();
-		ui.showModal(profile ? _('Edit local roaming profile') : _('Add local roaming profile'), [
-			E('p', {}, _('A local profile selects an SSID on this AP. Use the same stable profile ID on the other APs for the same network.')),
-			field(_('Stable profile ID'), id),
-			field(_('Local AP SSID'), section),
-			detected,
+		ui.showModal(_('Local wireless network'), [
+			E('p', {}, [network.ssid || _('SSID unavailable')]),
 			field(_('Enable roaming assistance for this local SSID'), enabled),
-			field(_('Check interval (seconds)'), interval),
-			field(_('Neighbor report expiry (seconds)'), ttl),
-			E('p', { class: 'cbi-section-descr' }, _('Expiry must be at least three times the check interval.')),
+			E('details', { class: 'wrtmesh-network-advanced' }, [
+				E('summary', {}, [_('Advanced settings')]),
+				field(_('Check interval (seconds)'), interval),
+				field(_('Neighbor report expiry (seconds)'), ttl),
+				E('p', { class: 'cbi-section-descr' }, _('Expiry must be at least three times the check interval.'))
+			]),
 			E('div', { class: 'right wrtmesh-actions' }, [
 				E('button', { class: 'btn', click: ui.hideModal }, _('Cancel')),
 				E('button', { class: 'btn cbi-button-positive', click: this.action(async () => {
-					for (const node of [id, section, interval, ttl])
+					for (const node of [interval, ttl])
 						if (!node.reportValidity())
 							return;
 					if (Number(ttl.value) < 3 * Number(interval.value))
 						throw new Error(_('Expiry must be at least three times the check interval.'));
-					result(await saveProfile(id.value.trim(), section.value, enabled.checked, Number(interval.value), Number(ttl.value)));
+					result(await saveNetwork(network.section, enabled.checked, Number(interval.value), Number(ttl.value)));
 					ui.hideModal();
 					await this.refresh(true);
-				}) }, _('Save local profile'))
+				}) }, _('Save network settings'))
 			])
 		]);
 	},
 
-	confirmRemoveProfile(profile) {
-		ui.showModal(_('Remove local roaming profile'), [
-			E('p', {}, [_('Remove this local roaming profile?'), ' ', this.profileLabel(profile.id)]),
-			E('p', { class: 'cbi-section-descr' }, _('Existing remote BSSID approvals are retained for this profile ID.')),
-			E('div', { class: 'right wrtmesh-actions' }, [
-				E('button', { class: 'btn', click: ui.hideModal }, _('Cancel')),
-				E('button', { class: 'btn cbi-button-negative', click: this.action(async () => {
-					result(await removeProfile(profile.id));
-					ui.hideModal();
-					await this.refresh(true);
-				}) }, _('Remove local profile'))
-			])
-		]);
-	},
-
-	localProfiles() {
+	localNetworks() {
 		if (!this.configuration)
-			return section(_('Local roaming profiles'), [
+			return section(_('Local wireless networks'), [
 				E('p', { class: 'cbi-section-descr', 'data-state': this.configurationError },
 					this.configurationError === 'forbidden' ? _('Permission to view local roaming settings was denied.') :
 						_('Local roaming settings are unavailable.'))
 			]);
-		const rows = this.configuration.profiles.map(profile => {
+		const rows = this.networks().map(network => {
 			const row = [
-				cell(profile.id),
-				cell(profile.ssid || _('SSID unavailable')),
-				cell(profile.enabled ? _('Roaming assistance enabled') : _('Roaming assistance disabled')),
-				cell(profile.supported === false ? _('Radio information unavailable') :
-					profile.mlo === true ? _('MLO, up to %d links').format(profile.max_links) :
-					profile.mlo === false ? _('Single link') : _('Radio information unavailable')),
-				cell('%d / %d s'.format(profile.interval, profile.ttl))
+				cell(network.ssid || _('SSID unavailable')),
+				cell(network.enabled ? _('Enabled') : _('Disabled')),
+				cell(!network.available ? _('AP unavailable') :
+					network.supported === false ? _('Radio information unavailable') : network.mlo ? _('MLO, up to %d links').format(network.max_links) : _('Single link'))
 			];
-			if (this.profileWritable)
-				row.push(E('div', { class: 'wrtmesh-actions' }, [
-					E('button', { class: 'btn', click: () => this.profileEditor(profile) }, _('Edit')),
-					E('button', { class: 'btn', click: this.action(async () => {
-						result(await saveProfile(profile.id, profile.section, !profile.enabled, profile.interval, profile.ttl));
-						await this.refresh(true);
-					}) }, profile.enabled ? _('Disable assistance') : _('Enable assistance')),
-					E('button', { class: 'btn cbi-button-negative', click: () => this.confirmRemoveProfile(profile) }, _('Remove local profile'))
-				]));
+			if (this.networkWritable)
+				row.push(E('button', { class: 'btn', click: () => this.networkEditor(network) }, _('Settings')));
 			return row;
 		});
-		const headers = [_('Profile ID'), _('Local SSID'), _('Assistance status'), _('Radio links'), _('Check / expiry')];
-		if (this.profileWritable)
+		const headers = [_('SSID'), _('Local collection'), _('Radio links')];
+		if (this.networkWritable)
 			headers.push('');
-		return section(_('Local roaming profiles'), [
-			E('p', { class: 'cbi-section-descr' }, _('Select the local SSIDs that publish and use roaming neighbor reports. Approve remote BSSIDs separately in each peer.')),
-			this.profileWritable ? E('div', { class: 'wrtmesh-actions' }, [
-				E('button', { class: 'btn cbi-button-add', click: () => this.profileEditor(null) }, _('Add local roaming profile'))
-			]) : null,
-			table(headers, rows, _('No local roaming profiles configured.'))
+		return section(_('Local wireless networks'), [
+			E('p', { class: 'cbi-section-descr' }, _('Select SSIDs in each peer to enable roaming assistance. The required local network settings are prepared automatically.')),
+			table(headers, rows, _('No local AP SSIDs configured.'))
+		]);
+	},
+
+	roamingStatus(data) {
+		const states = {
+			active: _('Roaming enabled'), pending: _('Preparing roaming'),
+			disabled: _('Roaming disabled'), unavailable: _('Roaming information unavailable'),
+			stale: _('Roaming information expired'), mismatch: _('Wireless settings differ'),
+			unsupported: _('Peer automatic roaming is unavailable'), error: _('Could not apply neighbor reports')
+		};
+		const reasons = {
+			not_selected: _('Roaming disabled'), local_disabled: _('Local assistance is disabled'),
+			local_unavailable: _('Local AP is unavailable'), local_ambiguous: _('Local SSID settings are ambiguous'),
+			local_security_unknown: _('Local wireless security information is unavailable'),
+			peer_unreachable: _('Peer is unreachable'), peer_forbidden: _('Peer denied snapshot access'),
+			peer_unavailable: _('Peer snapshot is unavailable'), peer_stale: _('Peer snapshot expired'),
+			identity_pending: _('Waiting for peer IP and MAC verification'), identity_mismatch: _('Peer IP and MAC do not match'),
+			peer_upgrade_required: _('Upgrade the peer to use automatic SSID roaming'),
+			peer_ssid_missing: _('The peer has not provided roaming information for this SSID'),
+			peer_security_mismatch: _('Wireless security settings differ'),
+			peer_reports_stale: _('Peer neighbor reports expired'), peer_reports_invalid: _('Peer neighbor reports are invalid'),
+			peer_ambiguous: _('Peer SSID settings are ambiguous'), bssid_collision: _('Peer wireless identity conflicts'),
+			awaiting_apply: _('Waiting for AP application'), apply_failed: _('Could not apply neighbor reports')
+		};
+		const groups = (data?.peers || []).map(peer => {
+			const entries = Array.isArray(peer.roaming) ? peer.roaming :
+				(peer.ssids || []).map(ssid => ({ ssid, state: 'pending' }));
+			if (!entries.length)
+				return null;
+			return E('section', { class: 'wrtmesh-roaming-group', 'data-peer': peer.bridge_mac }, [
+				E('h4', {}, [wrtmesh.nodeName(peer)]),
+				E('ul', { class: 'wrtmesh-roaming-networks' }, entries.map(entry => {
+					const state = entry.state || 'pending';
+					const label = state === 'active' ? states.active : reasons[entry.reason] || states[state] || states.pending;
+					const age = Number.isFinite(entry.age) ? _('%d seconds ago').format(entry.age) : _('Update time unavailable');
+					return E('li', { class: 'wrtmesh-roaming-network', 'data-ssid': entry.ssid }, [
+						E('strong', {}, [entry.ssid]),
+						E('span', { class: 'wrtmesh-roaming-state', 'data-state': state }, [label]),
+						E('span', { class: 'wrtmesh-secondary' }, [Number.isFinite(entry.age) ? _('Updated %s').format(age) : age])
+					]);
+				}))
+			]);
+		}).filter(Boolean);
+		return section(_('SSID roaming assistance'), [
+			...groups,
+			!groups.length ? E('p', {}, [_('No SSIDs selected for roaming assistance.')]) : null
 		]);
 	},
 
@@ -250,25 +251,33 @@ return view.extend({
 		const address = input('text', peer?.address, { maxlength: 15 });
 		const mac = input('text', peer?.bridge_mac, { maxlength: 17, readonly: peer && !discovered ? '' : null });
 		const name = input('text', peer?.name, { maxlength: 64 });
-		const profileIds = this.configuration?.profiles?.map(profile => profile.id) || this.data?.profiles || [];
-		const profiles = Object.fromEntries(profileIds.map(id => {
-			const pins = peer?.profiles?.[id];
-			return [id, input('text', Array.isArray(pins) ? pins.join(', ') : '', { maxlength: 60 })];
-		}));
+		const choices = [...new Set([...this.networks().map(network => network.ssid).filter(Boolean), ...(peer?.ssids || [])])];
+		const selected = new Set(peer?.ssids || []);
+		const ssids = choices.map(ssid => {
+			const checkbox = input('checkbox', '', { checked: selected.has(ssid) ? '' : null,
+				'aria-label': _('Allow roaming for %s').format(ssid) });
+			const available = this.networks().some(network => network.ssid === ssid);
+			return { ssid, checkbox, node: E('label', { class: 'wrtmesh-ssid-choice' }, [
+				checkbox, E('span', {}, [ssid,
+					!available ? E('small', { class: 'wrtmesh-secondary' }, [_('This SSID is no longer configured locally.')]) : null])
+			]) };
+		});
 		ui.showModal(_('Mesh peer'), [
-			discovered ? E('p', {}, _('Verify the bridge MAC and BSSIDs before saving this discovered peer. Discovery is unauthenticated.')) : null,
+			discovered ? E('p', {}, _('Verify the peer IPv4 address and bridge MAC before saving. Discovery is unauthenticated.')) : null,
 			field(_('Peer IPv4 address'), address),
 			field(_('Bridge MAC address'), mac),
 			field(_('Display name'), name),
-			E('h4', {}, _('Remote BSSID approvals')),
-			...Object.entries(profiles).map(([id, node]) => field(_('Remote BSSIDs for %s (optional)').format(this.profileLabel(id)), node)),
-			E('p', {}, _('A peer can share station status without BSSIDs. Roaming uses only the BSSIDs approved here.')),
+			E('h4', {}, _('SSIDs allowed for roaming')),
+			E('div', { class: 'wrtmesh-ssid-choices' }, ssids.length ? ssids.map(choice => choice.node) :
+				E('p', {}, [_('No local AP SSIDs configured.') ])),
+			E('p', { class: 'cbi-section-descr' }, _('BSSIDs and MLO links are learned automatically. The peer must offer the same SSID.')),
+			E('p', { class: 'cbi-section-descr' }, _('Leave all SSIDs unchecked to exchange only station and topology information.')),
 			E('div', { class: 'right' }, [
 				E('button', { class: 'btn', click: ui.hideModal }, _('Cancel')),
 				' ',
 				E('button', { class: 'btn cbi-button-positive', click: this.action(async () => {
-					const pins = Object.fromEntries(Object.entries(profiles).map(([id, node]) => [id, node.value]));
-					result(await savePeer(address.value.trim(), mac.value.trim(), name.value, pins));
+					const selected = ssids.filter(choice => choice.checkbox.checked).map(choice => choice.ssid);
+					result(await savePeer(address.value.trim(), mac.value.trim(), name.value, selected));
 					ui.hideModal();
 					await this.refresh(true);
 				}) }, _('Save peer'))
@@ -292,7 +301,7 @@ return view.extend({
 				const known = (this.data?.peers || []).find(p => p.bridge_mac === peer.bridge_mac);
 				if (known) {
 					peer.name = known.name || peer.name;
-					peer.profiles = { ...peer.profiles, ...known.profiles };
+					peer.ssids = known.ssids || [];
 				}
 				this.editor(peer, true);
 			}) }, _('Review'))
@@ -323,7 +332,7 @@ return view.extend({
 			const status = p.online ? _('Online') : _('No fresh snapshot');
 			const row = [cell(p.name || p.data?.name), cell(p.address), cell(p.bridge_mac.toUpperCase()),
 				E('span', { class: p.online ? 'wrtmesh-peer-status wrtmesh-online' : 'wrtmesh-peer-status' }, [status]),
-				cell(Object.keys(p.profiles).map(id => this.profileLabel(id)).join(', ') || '—')];
+				cell((p.ssids || []).join(', ') || '—')];
 			if (this.writable)
 				row.push(E('div', { class: 'wrtmesh-actions' }, [
 					E('button', { class: 'btn', click: () => this.editor(p, false) }, _('Edit')), ' ',
@@ -331,17 +340,18 @@ return view.extend({
 				]));
 			return row;
 		});
-		const headers = [_('Name'), _('IPv4 address'), _('Bridge MAC'), _('Peer status'), _('BSSID approval profiles')];
+		const headers = [_('Name'), _('IPv4 address'), _('Bridge MAC'), _('Peer status'), _('Roaming SSIDs')];
 		if (this.writable)
 			headers.push('');
 		const stationRows = wrtmesh.stations(data, true).map(s => [
-			wrtmesh.stationNetwork(s), cell(s.mac.toUpperCase()), wrtmesh.stationHost(s),
+			wrtmesh.stationNetwork(s), cell(s.mac.toUpperCase()), wrtmesh.stationHost(s, this.hostHints),
 			wrtmesh.stationSignal(s.signal), wrtmesh.stationRates(s)
 		]);
 		const truncated = data?.local?.truncated || data?.peers?.some(peer => peer.data?.truncated);
 		return E('div', {}, [
-			this.localProfiles(),
+			this.localNetworks(),
 			section(_('Mesh peers'), [table(headers, peers, _('No peers configured.'))]),
+			this.roamingStatus(data),
 			section(_('Mesh topology'), [wrtmesh.topology(data)]),
 			section(_('Associated Stations'), [
 				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached its station reporting limit.')) : null,
@@ -351,12 +361,12 @@ return view.extend({
 		]);
 	},
 
-	render([data, writable, configuration, profileWritable]) {
+	render([data, writable, configuration, networkWritable]) {
 		this.data = data;
 		this.writable = writable;
 		this.configuration = configuration?.data;
 		this.configurationError = configuration?.error;
-		this.profileWritable = profileWritable;
+		this.networkWritable = networkWritable;
 		this.content = E('div', {}, this.sections(data));
 		poll.add(() => this.refresh().catch(error => this.notify(error)), 15);
 		return E('div', { class: 'cbi-map' }, [

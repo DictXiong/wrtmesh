@@ -31,6 +31,7 @@ config_ready=0; publish_ready=0; force_apply=1; full_due=0; peer_due=0
 cached_source_ip=""; publish_suffix=""; status_check=""
 roam_fleet=0
 mesh_managed=0
+mesh_auto=0
 full_scans=0; cache_hits=0
 
 now() {
@@ -115,6 +116,7 @@ load_config() {
  fi
  roam_fleet=0
  mesh_managed=0
+ mesh_auto=0
  printf '%s\n' '[]' > "$STATE/fleet.config.next" || return 1
  case "$raw_peer_mode" in
   fleet)
@@ -174,7 +176,8 @@ load_config() {
      (.peers // (if .peer=="" and .peer_mac=="" and .peer_bssids==[] then []
        else [{id:"legacy",address:.peer,bridge_mac:.peer_mac,bssids:.peer_bssids}] end)) as $old |
      .peers = ([$old[] | select(.bridge_mac as $mac | all($overrides[]; .bridge_mac != $mac))] +
-       [$overrides[] | select(.disabled==false and (.bssids|length)>0) | del(.disabled)]) |
+       [$overrides[] | select(.disabled==false and (.auto==true or (.bssids|length)>0)) |
+         {id,address,bridge_mac,bssids:(if .auto==true then [] else .bssids end),auto:(.auto==true)}]) |
      del(.peer,.peer_mac,.peer_bssids) | .peer_mode="fleet" | .self_mac=$self' \
      "$STATE/config.next" > "$STATE/mesh.config" || return 1
    mv "$STATE/mesh.config" "$STATE/config.next" || return 1
@@ -201,7 +204,8 @@ load_config() {
   IFS= read -r roam_ssidhex
  } < "$STATE/config.fields" || return 1
  if [ "$roam_fleet" = 1 ]; then
-  "$JQ" -r '.peers[] | .id,.address,.bridge_mac,(.bssids|tojson)' "$STATE/config.json" > "$STATE/fleet.fields" || return 1
+  "$JQ" -r '.peers[] | .id,.address,.bridge_mac,(.bssids|tojson),(.auto//false)' "$STATE/config.json" > "$STATE/fleet.fields" || return 1
+  if "$JQ" -e 'any(.peers[];.auto==true)' "$STATE/config.json" >/dev/null; then mesh_auto=1; fi
  fi
 }
 
@@ -315,6 +319,8 @@ publish() {
  case "$revision" in *[!0-9a-f-]*) return 1;; esac
  case "$revision" in ????????-????-????-????-????????????) :;; *) return 1;; esac
  if [ "$publish_ready" != 1 ]; then
+  "$JQ" -jr 'sort_by(.bssid)|map(.bssid+":"+.nr)|join("\n")' "$STATE/links.json" |
+   sha256sum | cut -d ' ' -f1 > "$STATE/own.digest" || return 1
   "$JQ" -cnr --arg ssid "$roam_ssid" --arg mac "$roam_self_mac" --slurpfile own "$STATE/links.json" \
    '{version:1,bridge_mac:$mac,ssid:$ssid,reports:($own[0]|map({bssid,ssid,nr}))}|tojson|.[1:]' \
    > "$STATE/publish.suffix" || return 1
@@ -406,18 +412,103 @@ fetch_peer_one() {
   cmp -s "$peer_state/peer.next" "$peer_state/peer.json" || { fetch_reason=peer_revision_conflict; return 1; }
  fi
  "$JQ" -c '{list:(.reports|map([.bssid,.ssid,.nr]))}' "$peer_state/peer.json" > "$peer_state/peer.request.json" || return 1
+ "$JQ" -c '[.reports[].bssid]|sort' "$peer_state/peer.json" > "$peer_state/peer.bssids.json" || return 1
  printf '%s\n' "$report_count" > "$peer_state/count" || return 1
+}
+
+withdraw_auto() {
+ local peer_state=$1
+ # Keep the last per-source revision/first-seen record: a frozen publisher
+ # must not become fresh again merely because its accepted candidates expired.
+ rm -f "$peer_state/peer.json" "$peer_state/peer.last-good" "$peer_state/peer.request.json" \
+  "$peer_state/peer.digests.json" "$peer_state/peer.bssids.json" "$peer_state/peer.expires" "$peer_state/count"
+}
+
+fetch_auto_peer() {
+ local peer_state=$1 tick index digest expected count revision
+ tick=$(now)
+ fetch_reason=auto_unavailable
+ "$JQ" -ec --arg id "$peer_id" --arg address "$roam_peer" --arg mac "$roam_peer_mac" \
+  '.[] | select(.auto==true and .id==$id and .address==$address and .bridge_mac==$mac)' \
+  "$STATE/auto.peers" > "$peer_state/auto.entry" || return 1
+ fetch_reason=$("$JQ" -r '.reason//"auto_unavailable"' "$peer_state/auto.entry")
+ case "$fetch_reason" in ready) :;; *) return 1;; esac
+ fetch_reason=auto_payload_invalid
+ "$JQ" -e -L "$ROOT" --arg ssid "$roam_ssid" --arg mac "$roam_peer_mac" --argjson tick "$tick" \
+  --slurpfile own "$STATE/links.json" 'include "common";
+   (.revision|uuid) and (.parts|type=="array" and length>=1 and length<=3) and
+   all(.parts[];
+     (.source|profile_ok) and (.digest|type=="string" and length==64 and hex) and
+     (.seen|type=="number" and floor==. and .>=0 and .<=$tick) and
+     ((.ttl//95)|type=="number" and floor==. and .>=95 and .<=900) and
+     ($tick-.seen)<(.ttl//95) and (.envelope|public_auto_ok($ssid;$mac))) and
+   ([.parts[].source]|unique|length)==(.parts|length) and
+   ([.parts[].envelope.reports[]] as $reports |
+   ($reports|length)>=1 and ($reports|length)<=3 and
+   ([$reports[].bssid]|unique|length)==($reports|length) and
+   ([$reports[].bssid]-[$own[0][].bssid]|length)==($reports|length))' \
+  "$peer_state/auto.entry" >/dev/null 2>&1 || return 1
+ if [ -r "$peer_state/parts.json" ]; then
+  "$JQ" -e --slurpfile old "$peer_state/parts.json" '
+   all(.parts[]; . as $new | all($old[0][];
+     .source!=$new.source or .envelope.revision!=$new.envelope.revision or .envelope==$new.envelope))' \
+   "$peer_state/auto.entry" >/dev/null || { fetch_reason=peer_revision_conflict; return 1; }
+ else printf '%s\n' '[]' > "$peer_state/parts.json"
+ fi
+ "$JQ" -ec --argjson tick "$tick" --slurpfile old "$peer_state/parts.json" '
+   .parts | map(.ttl=(.ttl//95) | . as $new |
+     ([$old[0][]|select(.source==$new.source and .envelope.revision==$new.envelope.revision)][0]) as $prior |
+     .seen=(if $prior then ([.seen,$prior.seen]|min) else .seen end) |
+     .ttl=(if $prior then ([.ttl,($prior.ttl//95)]|min) else .ttl end))' \
+   "$peer_state/auto.entry" > "$peer_state/parts.next" || return 1
+ if ! "$JQ" -e --argjson tick "$tick" 'all(.[]; ($tick-.seen)>=0 and ($tick-.seen)<.ttl)' \
+   "$peer_state/parts.next" >/dev/null; then
+  mv "$peer_state/parts.next" "$peer_state/parts.json" || return 1
+  fetch_reason=reports_stale; return 1
+ fi
+ count=$("$JQ" -r length "$peer_state/parts.next") || return 1
+ index=0
+ while [ "$index" -lt "$count" ]; do
+  digest=$("$JQ" -jr --argjson i "$index" '.[ $i ].envelope.reports|sort_by(.bssid)|map(.bssid+":"+.nr)|join("\n")' \
+   "$peer_state/parts.next" | sha256sum | cut -d ' ' -f1) || return 1
+  expected=$("$JQ" -r --argjson i "$index" '.[ $i ].digest' "$peer_state/parts.next") || return 1
+  [ "$digest" = "$expected" ] || { fetch_reason=auto_digest_invalid; return 1; }
+  index=$((index+1))
+ done
+ revision=$("$JQ" -r .revision "$peer_state/auto.entry") || return 1
+ "$JQ" -c --arg ssid "$roam_ssid" --arg mac "$roam_peer_mac" --arg revision "$revision" \
+  '{version:1,bridge_mac:$mac,ssid:$ssid,revision:$revision,reports:([.[].envelope.reports[]]|sort_by(.bssid))}' \
+  "$peer_state/parts.next" > "$peer_state/peer.next" || return 1
+ "$JQ" -c '{list:(.reports|map([.bssid,.ssid,.nr]))}' "$peer_state/peer.next" > "$peer_state/peer.request.json" || return 1
+ "$JQ" -c 'map(.digest)|sort' "$peer_state/parts.next" > "$peer_state/peer.digests.json" || return 1
+ "$JQ" -c '[.[].envelope.reports[].bssid]|sort' "$peer_state/parts.next" > "$peer_state/peer.bssids.json" || return 1
+ "$JQ" -r 'map(.seen)|min' "$peer_state/parts.next" > "$peer_state/peer.last-good" || return 1
+ "$JQ" -r 'map(.seen+.ttl)|min' "$peer_state/parts.next" > "$peer_state/peer.expires" || return 1
+ "$JQ" -r '.reports|length' "$peer_state/peer.next" > "$peer_state/count" || return 1
+ mv "$peer_state/parts.next" "$peer_state/parts.json" || return 1
+ mv "$peer_state/peer.next" "$peer_state/peer.json" || return 1
+ fetch_reason=ok
 }
 
 fetch_peer() {
  if [ "$roam_fleet" != 1 ]; then fetch_peer_one; return; fi
- local peer_id peer_state failed=0 roam_peer roam_peer_mac roam_allowed
+ local peer_id peer_state failed=0 roam_peer roam_peer_mac roam_allowed auto tick fetch_legacy=1
+ tick=$(now)
+ if [ "${mode:-once}" = daemon ] && [ "$tick" -lt "$peer_due" ]; then fetch_legacy=0; fi
+ if [ "$mesh_auto" = 1 ]; then
+  "$TIMEOUT" 5 /usr/bin/ucode "$ROOT/mesh-sample.uc" roaming "$ROAM_PROFILE" > "$STATE/auto.peers" || printf '%s\n' '[]' > "$STATE/auto.peers"
+ fi
  fetch_reason=ok
- while IFS= read -r peer_id && IFS= read -r roam_peer && IFS= read -r roam_peer_mac && IFS= read -r roam_allowed; do
+ while IFS= read -r peer_id && IFS= read -r roam_peer && IFS= read -r roam_peer_mac && IFS= read -r roam_allowed && IFS= read -r auto; do
   peer_state=$STATE/peers/$peer_id
   [ ! -L "$STATE/peers" ] && [ ! -L "$peer_state" ] || return 1
   mkdir -p "$peer_state" && chmod 700 "$STATE/peers" "$peer_state" || return 1
-  if fetch_peer_one "$peer_state"; then :
+  if [ "$auto" = true ]; then
+   if fetch_auto_peer "$peer_state"; then :
+   else withdraw_auto "$peer_state"; failed=1
+   fi
+  elif [ "$fetch_legacy" != 1 ]; then continue
+  elif fetch_peer_one "$peer_state"; then :
   else failed=1
   fi
   printf '%s\n' "$fetch_reason" > "$peer_state/result" || return 1
@@ -427,11 +518,11 @@ fetch_peer() {
 }
 
 request_list_fleet() {
- local tick peer_id peer_address peer_mac allowed peer_state last_good age count result fresh sep="" newest=-1
+ local tick peer_id peer_address peer_mac allowed peer_state last_good age count result fresh sep="" newest=-1 auto expires digests bssids
  tick=$(now)
  : > "$STATE/fleet.requests.next" || return 1
  printf '[' > "$STATE/fleet.status.next" || return 1
- while IFS= read -r peer_id && IFS= read -r peer_address && IFS= read -r peer_mac && IFS= read -r allowed; do
+ while IFS= read -r peer_id && IFS= read -r peer_address && IFS= read -r peer_mac && IFS= read -r allowed && IFS= read -r auto; do
   peer_state=$STATE/peers/$peer_id; last_good=-1; count=0; result=not_attempted; fresh=false
   [ ! -r "$peer_state/peer.last-good" ] || IFS= read -r last_good < "$peer_state/peer.last-good"
   case "$last_good" in ""|*[!0-9]*) last_good=-1;; esac
@@ -440,20 +531,30 @@ request_list_fleet() {
   [ ! -r "$peer_state/result" ] || IFS= read -r result < "$peer_state/result"
   case "$result" in ""|*[!a-z_]* ) result=invalid_result;; esac
   age=$((tick-last_good))
-  if [ "$last_good" -ge 0 ] && [ "$age" -ge 0 ] && [ "$age" -lt "$roam_ttl" ] && [ -r "$peer_state/peer.request.json" ]; then
+  expires=$((last_good+roam_ttl)); digests='[]'; bssids='[]'
+  if [ "$auto" = true ]; then
+   expires=0
+   [ ! -r "$peer_state/peer.expires" ] || IFS= read -r expires < "$peer_state/peer.expires"
+   case "$expires" in ''|*[!0-9]*) expires=0;; esac
+   [ ! -r "$peer_state/peer.digests.json" ] || IFS= read -r digests < "$peer_state/peer.digests.json"
+  fi
+  [ ! -r "$peer_state/peer.bssids.json" ] || IFS= read -r bssids < "$peer_state/peer.bssids.json"
+  if [ "$last_good" -ge 0 ] && [ "$age" -ge 0 ] && [ "$tick" -lt "$expires" ] && [ -r "$peer_state/peer.request.json" ]; then
    fresh=true
    cat "$peer_state/peer.request.json" >> "$STATE/fleet.requests.next" || return 1
    [ "$last_good" -le "$newest" ] || newest=$last_good
   elif [ "$cycle_state" = ok ]; then cycle_state=degraded; cycle_reason=peer_unavailable
   fi
-  printf '%s{"id":"%s","last_revision_uptime":%s,"cached_count":%s,"fresh":%s,"fetch_result":"%s"}' \
-   "$sep" "$peer_id" "$last_good" "$count" "$fresh" "$result" >> "$STATE/fleet.status.next" || return 1
+  printf '%s{"id":"%s","address":"%s","bridge_mac":"%s","auto":%s,"digests":%s,"bssids":%s,"last_revision_uptime":%s,"expires_uptime":%s,"cached_count":%s,"fresh":%s,"fetch_result":"%s"}' \
+   "$sep" "$peer_id" "$peer_address" "$peer_mac" "$auto" "$digests" "$bssids" "$last_good" "$expires" "$count" "$fresh" "$result" >> "$STATE/fleet.status.next" || return 1
   sep=,
  done < "$STATE/fleet.fields"
  # Stable candidate content avoids repeated parsing and writes in quiet homes.
  if [ ! -r "$STATE/peer.request.json" ] || [ ! -r "$STATE/peer.json" ] ||
     ! cmp -s "$STATE/fleet.requests.next" "$STATE/fleet.requests.applied"; then
-  "$JQ" -cs '{list:([.[].list[]]|sort_by(.[0]))}' "$STATE/fleet.requests.next" > "$STATE/peer.request.json" || return 1
+  "$JQ" -ecs '[.[].list[]]|sort_by(.[0])|
+    if ([.[][0]]|unique|length)==length then {list:.} else error("duplicate peer BSSID") end' \
+    "$STATE/fleet.requests.next" > "$STATE/peer.request.json" || return 1
   cp "$STATE/fleet.requests.next" "$STATE/fleet.requests.applied" || return 1
   "$JQ" -c '{reports:(.list|map({bssid:.[0],ssid:.[1],nr:.[2]}))}' "$STATE/peer.request.json" > "$STATE/peer.json" || return 1
  fi
@@ -531,25 +632,31 @@ audit_matches() {
 }
 
 write_status() {
- local tick own_file=/dev/null peer_file=/dev/null request_file=/dev/null marker_file=/dev/null fleet_file=/dev/null transition
+ local tick own_file=/dev/null peer_file=/dev/null request_file=/dev/null marker_file=/dev/null fleet_file=/dev/null config_file=/dev/null transition own_digest="" applied=false
  tick=$(now)
  [ ! -r "$STATE/links.json" ] || own_file=$STATE/links.json
  [ ! -r "$STATE/peer.json" ] || peer_file=$STATE/peer.json
  [ ! -r "$STATE/request.json" ] || request_file=$STATE/request.json
  [ ! -r "$STATE/peer.last-good" ] || marker_file=$STATE/peer.last-good
  [ ! -r "$STATE/fleet.status.json" ] || fleet_file=$STATE/fleet.status.json
+ [ ! -r "$STATE/config.json" ] || config_file=$STATE/config.json
+ [ ! -r "$STATE/own.digest" ] || IFS= read -r own_digest < "$STATE/own.digest"
+ if [ "$force_apply" = 0 ] && [ "$cycle_state" != error ] && [ "$cycle_state" != stopped ] &&
+    [ -n "$status_apply" ] && [ -r "$STATE/applied.request.json" ] &&
+    cmp -s "$STATE/request.json" "$STATE/applied.request.json"; then applied=true; fi
  if [ "$cycle_state" != ok ] && [ "$cycle_state" != stopped ]; then
   status_last_error=$cycle_reason; status_last_error_at=$tick
  fi
  "$JQ" -cn --arg profile "$ROAM_PROFILE" --arg mode "${mode:-unknown}" --arg state "$cycle_state" --arg reason "$cycle_reason" \
   --arg fetch_result "$fetch_reason" --arg pid "$$" --argjson tick "$tick" \
+  --arg ssid "${roam_ssid:-}" --arg own_digest "$own_digest" --argjson applied "$applied" \
   --argjson interval "${roam_interval:-30}" --argjson ttl "${roam_ttl:-0}" \
   --arg check "$status_check" --argjson full_scans "$full_scans" --argjson cache_hits "$cache_hits" \
   --argjson full_interval "$COLLECT_INTERVAL" --argjson peer_interval "$PEER_INTERVAL" \
   --arg collect "$status_collect" --arg fetch "$status_fetch" --arg apply "$status_apply" \
   --arg error "$status_last_error" --arg error_at "$status_last_error_at" \
   --rawfile own "$own_file" --rawfile peer "$peer_file" \
-  --rawfile requested "$request_file" --rawfile marker "$marker_file" --rawfile fleet "$fleet_file" '
+  --rawfile requested "$request_file" --rawfile marker "$marker_file" --rawfile fleet "$fleet_file" --rawfile config "$config_file" '
    def decoded($text;$fallback): try ($text|fromjson) catch $fallback;
    def stamp: if .=="" then null else tonumber end;
    (decoded($own;[])|length) as $own_count |
@@ -557,13 +664,22 @@ write_status() {
    (decoded($requested;{})|(.list//[])|length) as $requested_count |
    (try ($marker|fromjson|if type=="number" and floor==. and .>=0 then . else null end) catch null) as $good |
    (if $good!=null and $tick>=$good then $tick-$good else null end) as $age |
-   {version:3,profile:$profile,mode:$mode,pid:($pid|tonumber),sampled_uptime:$tick,
+   {version:3,profile:$profile,ssid:$ssid,own_digest:$own_digest,mode:$mode,pid:($pid|tonumber),sampled_uptime:$tick,
     state:$state,reason:$reason,interval_seconds:$interval,
     cache:{full_scans:$full_scans,hits:$cache_hits,full_interval_seconds:$full_interval,peer_interval_seconds:$peer_interval},
     last_success:{check:($check|stamp),collect:($collect|stamp),fetch:($fetch|stamp),apply:($apply|stamp)},
     peer:{last_revision_uptime:$good,age_at_sample_seconds:$age,ttl_seconds:$ttl,
           fresh:($peer_count>0 and $age!=null and $age<$ttl),fetch_result:$fetch_result},
     counts:{own:$own_count,cached_peer:$peer_count,requested_peer:$requested_count},
+    applied_peers:(if $applied then
+      if $fleet!="" then
+       [decoded($fleet;[])[] | select(.fresh and .cached_count>0 and (.bssids|length)>0 and
+         (.auto!=true or (.digests|length)>0)) | {address,bridge_mac,digests,bssids,applied:true}]
+      elif $peer_count>0 and $age!=null and $age<$ttl then
+       decoded($config;{}) as $c | [{address:$c.peer,bridge_mac:$c.peer_mac,digests:[],
+         bssids:([decoded($peer;{}).reports[].bssid]|sort),applied:true}]
+      else [] end
+      else [] end),
     last_error:(if $error=="" then null else {reason:$error,uptime:($error_at|stamp)} end)} +
     (if $fleet!="" then {peer_mode:"fleet",peers:decoded($fleet;[])} else {} end)' \
    > "$STATE/status.next" || return 1
@@ -597,7 +713,9 @@ read_status() {
   . as $view |
   if has("peers") then .peers |= map(
     .age_seconds=(if .last_revision_uptime>=0 and $tick>=.last_revision_uptime then $tick-.last_revision_uptime else null end) |
-    .fresh=($view.snapshot_fresh and $view.state!="stopped" and .age_seconds!=null and .age_seconds<$view.peer.ttl_seconds and .cached_count>0)) else . end |
+    .fresh=($view.snapshot_fresh and $view.state!="stopped" and .age_seconds!=null and
+      (if .auto==true then $tick<.expires_uptime else .age_seconds<$view.peer.ttl_seconds end) and .cached_count>0)) |
+    if any(.peers[];.auto==true) then .peer.fresh=any(.peers[];.fresh) else . end else . end |
   if .snapshot_fresh then . else .state="stale" | .reason="status_stale" end' "$STATE/status.json"
 }
 
@@ -616,7 +734,7 @@ stop_daemon() {
 }
 
 cycle() {
- local tick full=0 changed=0 probe_ok=0 topology_changed=0
+ local tick full=0 changed=0 probe_ok=0 topology_changed=0 legacy_due=0
  cycle_state=ok; cycle_reason=ok
  tick=$(now)
  if [ "${mode:-once}" = daemon ]; then
@@ -672,13 +790,23 @@ cycle() {
  fi
  status_check=$(now)
  publish || { clear_tables || true; cycle_state=error; cycle_reason=publish_failed; return 1; }
- if [ "${mode:-once}" != daemon ] || [ "$tick" -ge "$peer_due" ]; then
-  if fetch_peer; then status_fetch=$(now); peer_due=$((tick+PEER_INTERVAL))
-  else cycle_state=degraded; cycle_reason=$fetch_reason; peer_due=$((tick+roam_interval))
+ if [ "${mode:-once}" != daemon ] || [ "$tick" -ge "$peer_due" ]; then legacy_due=1; fi
+ if [ "$legacy_due" = 1 ] || [ "$mesh_auto" = 1 ]; then
+  if fetch_peer; then
+   status_fetch=$(now)
+   [ "$legacy_due" != 1 ] || peer_due=$((tick+PEER_INTERVAL))
+  else
+   cycle_state=degraded; cycle_reason=$fetch_reason
+   [ "$legacy_due" != 1 ] || peer_due=$((tick+roam_interval))
   fi
  elif [ "$fetch_reason" != ok ]; then cycle_state=degraded; cycle_reason=$fetch_reason
  fi
- request_list || { cycle_state=error; cycle_reason=request_failed; return 1; }
+ request_list || {
+  printf '%s\n' '{"list":[]}' > "$STATE/request.json"
+  apply_list || true
+  rm -f "$STATE/applied.request.json"
+  force_apply=1; cycle_state=error; cycle_reason=request_failed; return 1
+ }
  if [ "$full" = 1 ] && ! audit_matches; then force_apply=1; fi
  if [ "${mode:-once}" != daemon ] || [ "$force_apply" = 1 ] || \
     ! cmp -s "$STATE/request.json" "$STATE/applied.request.json"; then

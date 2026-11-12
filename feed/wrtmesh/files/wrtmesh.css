@@ -229,3 +229,69 @@
 		font-weight: 600;
 	}
 }
+
+.wrtmesh-ssid-choices,
+.wrtmesh-roaming-networks {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+	gap: .65rem;
+	padding: 0;
+	margin-block: .7rem;
+	list-style: none;
+}
+
+.wrtmesh-ssid-choice {
+	display: flex;
+	align-items: flex-start;
+	gap: .65rem;
+	padding: .65rem .75rem;
+	border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+	border-radius: .4rem;
+	cursor: pointer;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-ssid-choice input {
+	flex: none;
+	margin-top: .25rem;
+}
+
+.wrtmesh-network-advanced {
+	margin-block: 1rem;
+}
+
+.wrtmesh-network-advanced > summary {
+	cursor: pointer;
+}
+
+.wrtmesh-roaming-group {
+	margin-block: .85rem;
+}
+
+.wrtmesh-roaming-group > h4 {
+	margin-block: .4rem;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-roaming-network {
+	display: flex;
+	flex-direction: column;
+	gap: .3rem;
+	padding: .7rem .85rem;
+	border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+	border-radius: .4rem;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-roaming-state {
+	font-weight: 600;
+}
+
+.wrtmesh-roaming-state[data-state="active"] {
+	color: var(--success-color-high, #15803d);
+}
+
+.wrtmesh-roaming-state[data-state="error"],
+.wrtmesh-roaming-state[data-state="mismatch"] {
+	color: var(--error-color-high, #b91c1c);
+}

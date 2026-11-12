@@ -45,7 +45,7 @@ const gateway = { address: '192.168.50.1', bridge: 'br-lan', port: 'wan', medium
 const local = { name: 'Local AP', bridge_mac: '02:00:00:00:00:02', gateway, stations: [station('20')] };
 const peer = (n, name, status, stations, age = 0) => ({
 	bridge_mac: '02:00:00:00:00:' + n, address: '192.168.50.' + n, name, status,
-	online: status === 'fresh', age, updated_at: age == null ? null : 1762900000 - age, profiles: {},
+	online: status === 'fresh', age, updated_at: age == null ? null : 1762900000 - age, profiles: {}, ssids: [],
 	data: status === 'fresh' ? { name, gateway, stations } : null
 });
 const mesh = peers => ({ address: '192.168.50.2', local, local_age: 0, peers, profiles: [] });
@@ -56,6 +56,10 @@ const configuration = {
 			max_links: 3, available: true, supported: true },
 		{ section: 'ssid_iot', ssid: 'Local IoT', iface: 'ap-iot', mlo: false,
 			max_links: 1, available: true, supported: true }
+	],
+	networks: [
+		{ section: 'ssid_main', ssid: 'Local Wi-Fi', iface: 'ap-mld0', mlo: true, max_links: 3, available: true, supported: true, enabled: false, interval: 30, ttl: 180 },
+		{ section: 'ssid_iot', ssid: 'Local IoT', iface: 'ap-iot', mlo: false, max_links: 1, available: true, supported: true, enabled: false, interval: 30, ttl: 180 }
 	],
 	limits: { profiles: 17, interval: { min: 30, max: 300, default: 30 },
 		ttl: { min: 180, max: 1800, default: 180 } }
@@ -157,26 +161,27 @@ async function harness(browser, { installed = true, data, writable = false, read
 				window.mock.configCalls++;
 				return window.mock.configuration;
 			}
-			if (object === 'wrtmesh' && method === 'profile_save') {
+			if (object === 'wrtmesh' && method === 'network_save') {
 				window.mock.operations.push({ method, args });
-				const [id, section, enabled, interval, ttl] = args;
-				const ssid = window.mock.configuration.ssids.find(choice => choice.section === section);
-				const value = { ...ssid, id, enabled, interval, ttl };
-				const index = window.mock.configuration.profiles.findIndex(profile => profile.id === id);
-				if (index < 0)
-					window.mock.configuration.profiles.push(value);
-				else
-					window.mock.configuration.profiles[index] = value;
-				window.mock.data.profiles = window.mock.configuration.profiles.filter(profile => profile.enabled).map(profile => profile.id);
-				return window.mock.profileReloadFail ? { saved: true, error: 'service_reload_failed' } : { saved: true };
+				const [section, enabled, interval, ttl] = args;
+				const value = window.mock.configuration.networks.find(choice => choice.section === section);
+				Object.assign(value, { enabled, interval, ttl });
+				return window.mock.networkReloadFail ? { saved: true, error: 'service_reload_failed' } : { saved: true };
 			}
-			if (object === 'wrtmesh' && method === 'profile_remove') {
+			if (object === 'wrtmesh' && method === 'peer_save') {
 				window.mock.operations.push({ method, args });
-				window.mock.configuration.profiles = window.mock.configuration.profiles.filter(profile => profile.id !== args[0]);
-				return { saved: true };
+				const [address, bridge_mac, name, ssids] = args;
+				const peer = window.mock.data.peers.find(peer => peer.bridge_mac === bridge_mac);
+				Object.assign(peer, { address, name, ssids });
+				peer.roaming = ssids.map(ssid => ({ ssid, state: 'pending', age: 0,
+					local_applied: false }));
+				for (const network of window.mock.configuration.networks)
+					if (ssids.includes(network.ssid))
+						network.enabled = true;
+				return window.mock.networkReloadFail ? { saved: true, error: 'service_reload_failed' } : { saved: true };
 			}
 			if (object === 'session' && method === 'access') {
-				const access = args.includes('save') || args.includes('profile_save') ? writable :
+				const access = args.includes('peer_save') || args.includes('network_save') ? writable :
 					args.includes('status') ? readable : args.includes('configuration') ? configReadable : true;
 				return expect?.access !== undefined ? access : { access };
 			}
@@ -184,7 +189,8 @@ async function harness(browser, { installed = true, data, writable = false, read
 		} };
 		const hosts = {
 			getHostnameByMACAddr: mac => mac.toLowerCase().endsWith(':10') ? 'Example client' : null,
-			getIPAddrByMACAddr: () => null, getIP6AddrByMACAddr: () => null
+			getIPAddrByMACAddr: mac => mac.toLowerCase().endsWith(':33') ? '192.168.68.153' : null,
+			getIP6AddrByMACAddr: mac => mac.toLowerCase().endsWith(':34') ? 'fd00::34' : null
 		};
 		const radio = { getName: () => 'radio0', getI18n: () => 'Test radio', isUp: () => true };
 		const net = {
@@ -277,7 +283,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 		assert.equal(await page.evaluate(() => mock.calls), 2, 'Mesh view reuses cached data');
 		assert.equal(await page.getByRole('img', { name: 'Mesh topology' }).count(), 1);
 		assert.equal(await page.getByRole('heading', { name: 'Associated Stations' }).count(), 1);
-		assert.equal(await page.getByRole('heading', { name: 'Local roaming profiles', exact: true }).count(), 1);
+		assert.equal(await page.getByRole('heading', { name: 'Local wireless networks', exact: true }).count(), 1);
 		assert.equal(await page.getByRole('button', { name: 'Add local roaming profile', exact: true }).count(), 0);
 		await page.evaluate(() => pollOverview());
 		assert.equal(await page.evaluate(() => mock.configCalls), 1, 'routine polling does not repeat wireless configuration discovery');
@@ -295,7 +301,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 		for (const configReadable of [false, true]) {
 			const { page, errors } = await harness(browser, { data: mesh([]), config: null, configReadable });
 			await page.evaluate(() => renderManagement());
-			const profiles = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local roaming profiles', exact: true }) });
+			const profiles = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local wireless networks', exact: true }) });
 			assert.equal(await profiles.locator('[data-state="' + (configReadable ? 'unavailable' : 'forbidden') + '"]').count(), 1);
 			assert.equal(await profiles.getByRole('button').count(), 0);
 			await page.evaluate(() => pollOverview());
@@ -306,57 +312,125 @@ async function harness(browser, { installed = true, data, writable = false, read
 		{
 			const { page, errors } = await harness(browser, { data: mesh([peer('11', 'Office', 'fresh', [])]), writable: true });
 			await page.evaluate(() => renderManagement());
-			const profiles = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local roaming profiles', exact: true }) });
-			assert.equal(await profiles.getByText('No local roaming profiles configured.', { exact: true }).count(), 1);
+			const networks = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local wireless networks', exact: true }) });
+			assert.equal(await networks.getByText('Local Wi-Fi', { exact: true }).count(), 1);
+			assert.equal(await page.getByText('No SSIDs selected for roaming assistance.', { exact: true }).count(), 1);
 			assert.equal(await page.evaluate(() => mock.configCalls), 1);
-			await profiles.getByRole('button', { name: 'Add local roaming profile', exact: true }).click();
-			let dialog = page.getByRole('dialog');
-			await dialog.getByLabel('Stable profile ID', { exact: true }).fill('office');
-			await dialog.getByLabel('Local AP SSID', { exact: true }).selectOption('ssid_main');
-			await dialog.getByText('Detected MLO with up to 3 links.', { exact: true }).waitFor();
-			await dialog.getByRole('button', { name: 'Save local profile', exact: true }).click();
-			await page.getByRole('dialog').waitFor({ state: 'detached' });
-			let row = profiles.getByRole('row').filter({ hasText: 'office' });
-			assert.match(await row.textContent(), /Local Wi-Fi.*Roaming assistance disabled/);
-			assert.deepEqual(await page.evaluate(() => mock.operations[0]), {
-				method: 'profile_save', args: ['office', 'ssid_main', false, 30, 180]
-			});
 			const peersSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Mesh peers', exact: true }) });
 			await peersSection.getByRole('button', { name: 'Edit', exact: true }).click();
+			let dialog = page.getByRole('dialog');
+			assert.equal(await dialog.getByLabel('Stable profile ID', { exact: true }).count(), 0);
+			assert.equal(await dialog.getByLabel(/BSSID/).count(), 0);
+			assert.equal(await dialog.locator('input[type="text"]').count(), 3);
+			assert.equal(await dialog.getByLabel('Allow roaming for Local Wi-Fi', { exact: true }).isChecked(), false);
+			await dialog.getByLabel('Allow roaming for Local Wi-Fi', { exact: true }).check();
+			await dialog.getByRole('button', { name: 'Save peer', exact: true }).click();
+			await page.getByRole('dialog').waitFor({ state: 'detached' });
+			assert.deepEqual(await page.evaluate(() => mock.operations), [{
+				method: 'peer_save', args: ['192.168.50.11', '02:00:00:00:00:11', 'Office', ['Local Wi-Fi']]
+			}], 'peer SSID selection is one authenticated operation without profile IDs or BSSIDs');
+			const network = networks.getByRole('row').filter({ hasText: 'Local Wi-Fi' });
+			assert.match(await network.textContent(), /Enabled/);
+			assert.equal(await page.locator('.wrtmesh-roaming-state[data-state="pending"]').count(), 1);
+			assert.equal(await page.getByText('Roaming enabled', { exact: true }).count(), 0,
+				'saving a selected SSID does not claim an applied report');
+			await network.getByRole('button', { name: 'Settings', exact: true }).click();
 			dialog = page.getByRole('dialog');
-			assert.equal(await dialog.getByLabel('Remote BSSIDs for Local Wi-Fi (office) (optional)', { exact: true }).count(), 1,
-				'disabled local profiles are available for remote BSSID approval');
-			await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-			await row.getByRole('button', { name: 'Enable assistance', exact: true }).click();
-			await row.getByRole('button', { name: 'Disable assistance', exact: true }).waitFor();
-			assert.deepEqual(await page.evaluate(() => mock.data.profiles), ['office']);
-			await row.getByRole('button', { name: 'Edit', exact: true }).click();
-			dialog = page.getByRole('dialog');
-			assert.equal(await dialog.getByLabel('Stable profile ID', { exact: true }).getAttribute('readonly'), '');
-			await dialog.getByLabel('Local AP SSID', { exact: true }).selectOption('ssid_iot');
+			assert.equal(await dialog.locator('details').evaluate(node => node.open), false, 'timing defaults stay collapsed');
+			assert.equal(await dialog.getByLabel('Stable profile ID', { exact: true }).count(), 0);
+			await dialog.getByText('Advanced settings', { exact: true }).click();
 			await dialog.getByLabel('Check interval (seconds)', { exact: true }).fill('120');
 			await dialog.getByLabel('Neighbor report expiry (seconds)', { exact: true }).fill('180');
 			const before = await page.evaluate(() => mock.operations.length);
-			await dialog.getByRole('button', { name: 'Save local profile', exact: true }).click();
+			await dialog.getByRole('button', { name: 'Save network settings', exact: true }).click();
 			assert.equal(await page.evaluate(() => mock.operations.length), before, 'invalid expiry is rejected before RPC');
 			await page.getByRole('alert').filter({ hasText: 'Expiry must be at least three times' }).waitFor();
 			await dialog.getByLabel('Neighbor report expiry (seconds)', { exact: true }).fill('600');
-			await page.evaluate(() => { mock.profileReloadFail = true; });
-			await dialog.getByRole('button', { name: 'Save local profile', exact: true }).click();
+			await page.evaluate(() => { mock.networkReloadFail = true; });
+			await dialog.getByRole('button', { name: 'Save network settings', exact: true }).click();
 			await page.getByRole('dialog').waitFor({ state: 'detached' });
-			row = profiles.getByRole('row').filter({ hasText: 'office' });
-			assert.match(await row.textContent(), /Local IoT.*Single link/);
 			await page.getByRole('alert').filter({ hasText: 'Settings were saved, but the roaming service could not reload.' }).waitFor();
-			await page.evaluate(() => { mock.profileReloadFail = false; });
-			await row.getByRole('button', { name: 'Disable assistance', exact: true }).click();
-			await row.getByRole('button', { name: 'Enable assistance', exact: true }).waitFor();
-			await row.getByRole('button', { name: 'Remove local profile', exact: true }).click();
-			await page.getByRole('dialog').getByRole('button', { name: 'Remove local profile', exact: true }).click();
-			await page.getByRole('dialog').waitFor({ state: 'detached' });
-			assert.equal(await profiles.getByText('No local roaming profiles configured.', { exact: true }).count(), 1);
+			assert.deepEqual(await page.evaluate(() => mock.operations.at(-1)), {
+				method: 'network_save', args: ['ssid_main', true, 120, 600]
+			});
+			const reads = await page.evaluate(() => mock.configCalls);
+			await page.evaluate(() => {
+				mock.data.peers[0].roaming = [{ ssid: 'Local Wi-Fi', state: 'active', age: 3,
+					updated_at: 1762900000, local_applied: true }];
+				mock.now += 16000;
+				return pollOverview();
+			});
+			assert.equal(await page.getByText('Roaming enabled', { exact: true }).count(), 1);
+			assert.equal(await page.getByText('Updated 3 seconds ago', { exact: true }).count(), 1);
+			assert.equal(await page.locator('.wrtmesh-roaming-state[data-state="active"]').count(), 1);
+			assert.equal(await page.evaluate(() => mock.configCalls), reads, 'status polling reuses sampled data without configuration RPC');
 			assert.deepEqual(errors, []);
 			await page.close();
 		}
+		{
+			const value = peer('11', 'Office', 'fresh', []);
+			value.ssids = ['Removed SSID'];
+			const { page, errors } = await harness(browser, { data: mesh([value]), writable: true });
+			await page.evaluate(() => renderManagement());
+			await page.getByRole('button', { name: 'Edit', exact: true }).click();
+			const dialog = page.getByRole('dialog');
+			assert.equal(await dialog.getByLabel('Allow roaming for Removed SSID', { exact: true }).isChecked(), true);
+			assert.equal(await dialog.getByText('This SSID is no longer configured locally.', { exact: true }).count(), 1);
+			await dialog.getByLabel('Allow roaming for Removed SSID', { exact: true }).uncheck();
+			await dialog.getByRole('button', { name: 'Save peer', exact: true }).click();
+			await page.getByRole('dialog').waitFor({ state: 'detached' });
+			assert.deepEqual(await page.evaluate(() => mock.operations.at(-1).args.at(-1)), [], 'explicit empty selection removes dormant policy');
+			assert.deepEqual(errors, []);
+			await page.close();
+		}
+		{
+			const value = peer('11', 'Office', 'fresh', []);
+			const states = ['pending', 'disabled', 'unavailable', 'stale', 'mismatch', 'unsupported', 'error'];
+			const reasons = ['identity_pending', 'local_disabled', 'peer_unreachable', 'peer_reports_stale', 'identity_mismatch', 'peer_upgrade_required', 'apply_failed'];
+			value.roaming = states.map((state, index) => ({ ssid: 'Network ' + index, state, reason: reasons[index], age: index, local_applied: false }));
+			const { page, errors } = await harness(browser, { data: mesh([value]), mobile: true });
+			await page.evaluate(() => renderManagement());
+			for (const state of states)
+				assert.equal(await page.locator('.wrtmesh-roaming-state[data-state="' + state + '"]').count(), 1, state);
+			assert.equal(await page.getByText('Roaming enabled', { exact: true }).count(), 0);
+			for (const label of ['Waiting for peer IP and MAC verification', 'Local assistance is disabled', 'Peer is unreachable', 'Peer neighbor reports expired', 'Peer IP and MAC do not match', 'Upgrade the peer to use automatic SSID roaming', 'Could not apply neighbor reports'])
+				assert.equal(await page.getByText(label, { exact: true }).count(), 1, label);
+			assert.equal(await page.locator('.wrtmesh-roaming-group').getByRole('heading', { name: 'Office (192.168.50.11)', exact: true }).count(), 1);
+			const width = await page.locator('.wrtmesh-roaming-network').first().evaluate(node => node.getBoundingClientRect().width);
+			assert(width <= 390, 'SSID state card fits a mobile viewport');
+			await page.evaluate(() => {
+				mock.data.peers[0].roaming[0] = { ssid: 'Network 0', state: 'unavailable', reason: 'peer_ssid_missing' };
+				mock.now += 16000;
+				return pollOverview();
+			});
+			assert.equal(await page.getByText('The peer has not provided roaming information for this SSID', { exact: true }).count(), 1);
+			assert.equal(await page.getByText('The peer does not offer this SSID', { exact: true }).count(), 0);
+			assert.deepEqual(errors, []);
+			await page.close();
+		}
+		{
+			const value = peer('11', 'Office AP name', 'fresh', [
+				station('31', { name: 'Named client', ipv4: '192.168.68.152' }),
+				station('32', { ipv4: '192.168.68.151' }),
+				station('34', {}), station('40', {}),
+				station('35', { mld: '02:00:00:00:02:35', links: [{ id: 0, mac: '02:00:00:00:02:33', bssid: '02:00:00:00:04:33' }] })
+			]);
+			const { page, errors } = await harness(browser, { data: mesh([value]), mobile: true });
+			const labels = await page.locator('.wrtmesh-client-details > summary').allTextContents();
+			assert(labels.includes('Named client'), 'reported client hostname takes priority over its IP');
+			assert(labels.includes('192.168.68.151'), 'known client IPv4 is shown when hostname is absent');
+			assert(labels.includes('192.168.68.153'), 'MLD link aliases can resolve host hint IPv4');
+			assert(labels.includes('fd00::34'), 'IPv6 is used when no name or IPv4 is known');
+			assert(labels.includes('?'), 'truly unknown client stays compact');
+			assert(!labels.some(label => label.includes('Office AP name') || label.includes('02:00:00')), 'AP name and MAC never replace client identity');
+			await page.evaluate(() => renderManagement());
+			const meshLabels = await page.locator('.wrtmesh-host').allTextContents();
+			for (const label of ['Named client', '192.168.68.151', '192.168.68.153', 'fd00::34', '?'])
+				assert(meshLabels.includes(label), 'Mesh Host shares client fallback: ' + label);
+			assert.deepEqual(errors, []);
+			await page.close();
+		}
+
 		if (scripts.legacyWifi) {
 			const { page, errors } = await harness(browser, { data: mesh(peers), legacyWifi: true });
 			assert.equal(await page.getByRole('img', { name: 'Mesh topology' }).count(), 1);
@@ -364,7 +438,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 			assert.deepEqual(errors, []);
 			await page.close();
 		}
-		console.log('Chromium passed stock Overview, Mesh display, local profile lifecycle, remote approvals, polling and failures.');
+		console.log('Chromium passed stock Overview, Mesh display, SSID selection, automatic local preparation, AP confirmation states, polling and failures.');
 	} finally {
 		await browser.close();
 	}

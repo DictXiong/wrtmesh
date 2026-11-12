@@ -76,6 +76,7 @@ config roaming 'main'
         (stage / 'mesh.uc').write_text(
             (source / 'mesh.uc').read_text()
             .replace('/tmp/wrtmesh-private/mesh', str(state))
+            .replace('/etc/config/', str(config) + '/')
             .replace('/tmp/wrtmesh-public/', str(stage / 'public') + '/')
             .replace('/usr/bin/curl', str(curl))
             .replace('/proc/uptime', str(clock))
@@ -95,6 +96,7 @@ config roaming 'main'
                             .replace('/usr/lib/wrtmesh/mesh.uc', str(stage / 'mesh.uc'))
                             .replace("from 'ubus'", f"from '{stage}/fixture-ubus.uc'")
                             .replace("from 'rtnl'", f"from '{stage}/fixture-rtnl.uc'")
+                            .replace('/etc/config/', str(config) + '/')
                             .replace('/var/lock/wrtmesh-config.lock', str(stage / 'config.lock'))
                             .replace('rtnl.const', 'rtnl.constants'))
         (stage / 'fixture-ubus.uc').write_text(f"""

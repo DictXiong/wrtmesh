@@ -27,7 +27,15 @@ function mutate(handler, args) {
 }
 
 function context() {
-	let bus = ubus.connect(null, 1);
+	let connection = ubus.connect(null, 1), cache = {};
+	let bus = { call: (object, method, args) => {
+		let key = object + ':' + method;
+		if (key == 'network.wireless:status' || (method == 'get_status' && substr(object, 0, 8) == 'hostapd.')) {
+			if (key in cache) return cache[key];
+			return cache[key] = connection?.call(object, method, args);
+		}
+		return connection?.call(object, method, args);
+	} };
 	let config = mesh.cursor();
 	let overrides = mesh.overrides(config);
 	return { bus, config, overrides, ...mesh.peer_inventory(config, overrides),
@@ -51,14 +59,14 @@ function status() {
 		if (status == 'fresh' && (!entry.data || age == null || age >= mesh.ttl))
 			status = 'stale';
 		let online = status == 'fresh';
-		push(peers, { ...p, status, online, age, updated_at: age == null ? null : wall - age,
+		push(peers, { ...p, status, online, age, identity: entry?.identity ?? 'unknown', updated_at: age == null ? null : wall - age,
 			data: online ? entry.data : null });
 	}
 	return {
 		local: local_age != null && local_age < mesh.ttl ? local.data : ctx.node,
 		local_age, local_updated_at: local_age == null ? null : wall - local_age,
 		address: ctx.lan?.address,
-		peers, profiles: keys(mesh.profiles(ctx.config))
+		peers: mesh.roaming_status(ctx.config, peers, cache, now, wall), profiles: keys(mesh.profiles(ctx.config))
 	};
 }
 
@@ -67,6 +75,7 @@ function configuration() {
 	let ssids = mesh.local_ssids(ctx.config, ctx.bus);
 	return {
 		profiles: mesh.local_profiles(ctx.config, ssids), ssids,
+		networks: mesh.local_networks(ctx.config, ctx.bus),
 		limits: {
 			profiles: 17, max_links: 3,
 			interval: { min: 30, max: 300, default: 30 },
@@ -79,6 +88,156 @@ function finish_commit(config, name) {
 	if (!config.commit(name))
 		return { error: 'save_failed' };
 	return mesh.reconcile() ? { saved: true } : { saved: true, error: 'service_reload_failed' };
+}
+
+// Owned UCI files only. If the second commit fails, restore both raw files
+// byte-for-byte before returning; no wireless/network writes are performed.
+function commit_pair(config) {
+	let files = ['/etc/config/wrtmesh', '/etc/config/wrtmesh_peers'];
+	let originals = map(files, path => fs.readfile(path, 65537));
+	if (length(filter(originals, value => type(value) != 'string' || length(value) > 65536)))
+		return { error: 'save_failed' };
+	if (!config.commit('wrtmesh'))
+		return { error: 'save_failed' };
+	if (!config.commit('wrtmesh_peers')) {
+		let restored = true;
+		for (let index, path in files) {
+			let backup = path + '.wrtmesh-rpc-rollback';
+			let stream = fs.open(backup, 'wx', 0o600);
+			let written = stream && stream.write(originals[index]) == length(originals[index]);
+			stream?.close();
+			let renamed = written && fs.rename(backup, path);
+			if (stream && !renamed) fs.unlink(backup);
+			restored &&= renamed;
+		}
+		return restored ? { error: 'save_failed' } : { saved: true, error: 'rollback_failed' };
+	}
+	return mesh.reconcile() ? { saved: true } : { saved: true, error: 'service_reload_failed' };
+}
+
+function stage_network(ctx, section, enabled, interval, ttl) {
+	if (type(enabled) != 'bool')
+		return 'invalid_profile_enabled';
+	if (!mesh.profile_timers(interval, ttl))
+		return 'invalid_profile_timers';
+	let networks = mesh.local_networks(ctx.config, ctx.bus);
+	let selected = filter(networks, item => index(item.sections, section) >= 0)[0];
+	if (!selected) {
+		let existing = [];
+		ctx.config.foreach('wrtmesh', 'roaming', s => {
+			if (s.section == section)
+				push(existing, s['.name']);
+		});
+		if (enabled || !length(existing))
+			return 'invalid_profile_section';
+		for (let id in existing)
+			if (!ctx.config.set('wrtmesh', id, 'enabled', '0'))
+				return 'save_failed';
+		return null;
+	}
+	if (!enabled) {
+		let failed = false;
+		ctx.config.foreach('wrtmesh', 'roaming', s => {
+			let value = ctx.config.get('wireless', s.section, 'ssid') ?? s.ssid;
+			if (value == selected.ssid &&
+			    (!ctx.config.set('wrtmesh', s['.name'], 'enabled', '0') ||
+			     !ctx.config.set('wrtmesh', s['.name'], 'interval', sprintf('%d', interval)) ||
+			     !ctx.config.set('wrtmesh', s['.name'], 'ttl', sprintf('%d', ttl)))) failed = true;
+		});
+		return failed ? 'save_failed' : null;
+	}
+	if (enabled && !selected.supported)
+		return selected.reason == 'local_ambiguous' ? 'ambiguous_ssid' : 'profile_runtime_unavailable';
+	let retired = [];
+	ctx.config.foreach('wrtmesh', 'roaming', p => {
+		if (p.managed == 'ssid' && (ctx.config.get('wireless', p.section) != 'wifi-iface' ||
+		    ctx.config.get('wireless', p.section, 'mode') != 'ap')) push(retired, p['.name']);
+	});
+	for (let id in retired)
+		if (!ctx.config.delete('wrtmesh', id)) return 'save_failed';
+	let count = 0;
+	ctx.config.foreach('wrtmesh', 'roaming', () => { count++; });
+	for (let member in selected.members) {
+		let profiles = filter(selected.profiles, p => p.section == member.section);
+		if (length(profiles) > 1)
+			return 'duplicate_profile_section';
+		let id = profiles[0]?.id;
+		if (!enabled) {
+			if (id && (!ctx.config.set('wrtmesh', id, 'enabled', '0') ||
+			    !ctx.config.set('wrtmesh', id, 'interval', sprintf('%d', interval)) ||
+			    !ctx.config.set('wrtmesh', id, 'ttl', sprintf('%d', ttl))))
+				return 'save_failed';
+			continue;
+		}
+		if (!id) {
+			if (++count > 17)
+				return 'profile_limit';
+			let base = 'n_' + substr(member.section, 0, 40), index = 0;
+			id = base;
+			while (ctx.config.get('wrtmesh', id))
+				id = base + '_' + ++index;
+			if (!ctx.config.set('wrtmesh', id, 'roaming') ||
+			    !ctx.config.set('wrtmesh', id, 'managed', 'ssid'))
+				return 'save_failed';
+		}
+		for (let p in mesh.local_profiles(ctx.config, mesh.local_ssids(ctx.config, ctx.bus)))
+			if (p.id != id && p.enabled && p.iface == member.iface)
+				return 'duplicate_profile_section';
+		for (let key, value in { section: member.section, iface: member.iface,
+			mlo: member.mlo ? '1' : '0', max_links: member.max_links, enabled: '1', interval, ttl })
+			if (!ctx.config.set('wrtmesh', id, key, sprintf('%s', value)))
+				return 'save_failed';
+	}
+	return null;
+}
+
+function network_save(args) {
+	let ctx = context();
+	let error = stage_network(ctx, args.section, args.enabled, args.interval, args.ttl);
+	return error ? { error } : finish_commit(ctx.config, 'wrtmesh');
+}
+
+function peer_save(args) {
+	let ctx = context(), addr = mesh.mac(args.bridge_mac);
+	let name = mesh.label(trim(args.name), 64), selection = mesh.ssid_list(args.ssids);
+	if (!ctx.node.bridge_mac || !addr || addr == ctx.node.bridge_mac || name == null ||
+	    !mesh.on_lan(ctx.lan, args.address))
+		return { error: 'invalid_peer' };
+	if (selection == null)
+		return { error: 'invalid_ssid' };
+	let peers = filter(ctx.peers, p => p.bridge_mac != addr);
+	if (length(peers) >= mesh.limit)
+		return { error: 'peer_limit' };
+	if (length(filter(peers, p => p.address == args.address)))
+		return { error: 'duplicate_address' };
+	let networks = mesh.local_networks(ctx.config, ctx.bus);
+	let old = ctx.overrides[addr] ?? ctx.legacy[addr];
+	let original = old ? mesh.selected_ssids(old, mesh.configured_networks(ctx.config)) : [];
+	for (let name in selection) {
+		let network = filter(networks, n => n.ssid == name)[0];
+		if (!network) {
+			// Keep a previously selected but removed local SSID editable. It
+			// remains inactive until the actual local network exists again.
+			if (index(original, name) >= 0)
+				continue;
+			return { error: 'invalid_ssid' };
+		}
+		let error = stage_network(ctx, network.section, true, network.interval, network.ttl);
+		if (error)
+			return { error };
+	}
+	let id = mesh.peer_key(addr);
+	if (ctx.config.get('wrtmesh_peers', id))
+		ctx.config.delete('wrtmesh_peers', id);
+	for (let key, value in { bridge_mac: addr, address: args.address, name, ssid_mode: 'auto' }) {
+		if (!ctx.config.get('wrtmesh_peers', id) && !ctx.config.set('wrtmesh_peers', id, 'peer'))
+			return { error: 'save_failed' };
+		if (!ctx.config.set('wrtmesh_peers', id, key, value))
+			return { error: 'save_failed' };
+	}
+	if (length(selection) && !ctx.config.set('wrtmesh_peers', id, 'roam_ssid', selection))
+		return { error: 'save_failed' };
+	return commit_pair(ctx.config);
 }
 
 function profile_save(args) {
@@ -228,7 +387,8 @@ function identify(args) {
 		if (list)
 			profiles[id] = list;
 	}
-	return { peer: { address: args.address, bridge_mac: addr, name: mesh.label(data.name, 64) || '', profiles } };
+	return { peer: { address: args.address, bridge_mac: addr, name: mesh.label(data.name, 64) || '', profiles,
+		available_ssids: mesh.ssid_list(data.available_ssids ?? []) ?? [] } };
 }
 
 function commit(ctx, addr, peer) {
@@ -304,6 +464,8 @@ return {
 	wrtmesh: {
 		status: { call: status },
 		configuration: { call: configuration },
+		network_save: { args: { section: '', enabled: false, interval: 30, ttl: 180 }, call: req => mutate(network_save, req.args) },
+		peer_save: { args: { address: '', bridge_mac: '', name: '', ssids: [] }, call: req => mutate(peer_save, req.args) },
 		profile_save: {
 			args: { id: '', section: '', enabled: false, interval: 30, ttl: 180, metadata: {} },
 			call: req => mutate(profile_save, req.args)

@@ -109,6 +109,22 @@ def historical_package(apk, stage, name, version, overview=False):
     return package
 
 
+def canonical_package(apk, stage):
+    payload = stage / 'canonical-previous'
+    configs = ['etc/config/wrtmesh', 'etc/config/wrtmesh_peers']
+    for relative in configs:
+        write(payload, relative, b'# Previous canonical defaults\n', 0o600)
+    for relative in OWNED_UI:
+        write(payload, relative, b'/* Previous package-owned UI fixture */\n')
+    write(payload, 'etc/init.d/wrtmesh', b'#!/bin/sh\nexit 0\n', 0o755)
+    hashes = ''.join('/' + path + ' ' + hashlib.sha256((payload / path).read_bytes()).hexdigest() + '\n'
+                     for path in configs)
+    write(payload, 'lib/apk/packages/wrtmesh.conffiles_static', hashes.encode())
+    package = stage / 'wrtmesh-6.3.0-r1.apk'
+    mkpkg(apk, package, 'wrtmesh', '6.3.0-r1', payload)
+    return package
+
+
 def snapshot_preinstall(root, makefile):
     script = re.search(r'^define Package/wrtmesh/preinst\n(.*?)^endef$', makefile, re.M | re.S)[1]
     script = script.replace('$$', '$')
@@ -140,6 +156,7 @@ def test(apk, apk_builder, new, old, previous):
                   historical_package(apk_builder, stage, 'xr-roaming', '6.0.0-r2'))
         previous61 = historical_package(apk_builder, stage, 'wrtmesh', '6.1.0-r2')
         previous62 = historical_package(apk_builder, stage, 'wrtmesh', '6.2.0-r1', overview=True)
+        previous63 = canonical_package(apk_builder, stage)
         if previous:
             supplied = Path(shutil.copyfile(previous, stage / ('supplied-' + previous.name)))
             version = re.search(r'^  version: (.+)$', run(apk, 'adbdump', supplied), re.M)[1]
@@ -147,10 +164,12 @@ def test(apk, apk_builder, new, old, previous):
                 previous61 = supplied
             elif version.startswith('6.2.'):
                 previous62 = supplied
+            elif version.startswith('6.3.'):
+                previous63 = supplied
             else:
-                raise ValueError('--previous-package must be a wrtmesh 6.1 or 6.2 package')
+                raise ValueError('--previous-package must be a wrtmesh 6.1, 6.2 or 6.3 package')
         dependency_paths = []
-        names = set().union(*(dependencies(apk, package) for package in (legacy, previous61, previous62, new)))
+        names = set().union(*(dependencies(apk, package) for package in (legacy, previous61, previous62, previous63, new)))
         for name in sorted(names | {'luci-mod-status'}):
             path = stage / (name + '-1-r0.apk')
             payload = None
@@ -168,6 +187,7 @@ def test(apk, apk_builder, new, old, previous):
             ('local-legacy', legacy, False),
             ('upgrade-6.1', previous61, False),
             ('upgrade-6.2', previous62, False),
+            ('upgrade-6.3', previous63, True),
             ('canonical-wins', previous62, True),
         )
         for kind, baseline, canonical in scenarios:
@@ -181,9 +201,15 @@ def test(apk, apk_builder, new, old, previous):
                 stock = root / INCLUDE / '60_wifi.js'
                 other = root / INCLUDE / '66_other.js'
                 assert stock.read_bytes() == STOCK and other.read_bytes() == OTHER
-                if baseline is not None:
+                if baseline is not None and kind != 'upgrade-6.3':
                     write(root, 'etc/config/xr_roaming', ROAMING, 0o600)
                     write(root, 'etc/config/xr_mesh', MESH, 0o600)
+                if kind == 'upgrade-6.3':
+                    # Model a completed earlier migration and later canonical
+                    # edits; an upgrade must never restore the archived data.
+                    write(root, 'etc/wrtmesh/migration/roaming.uci', ROAMING, 0o600)
+                    write(root, 'etc/wrtmesh/migration/peers.uci', MESH, 0o600)
+                    write(root, 'etc/wrtmesh/migration/complete', b'1\n', 0o600)
                 if canonical:
                     write(root, 'etc/config/wrtmesh', CANONICAL_ROAMING, 0o600)
                     write(root, 'etc/config/wrtmesh_peers', CANONICAL_PEERS, 0o600)
@@ -240,7 +266,7 @@ def main():
     parser.add_argument('--apk-builder', help='Host APK with mkpkg when --apk is an OpenWrt target')
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--old-package', type=Path, help='an xr-roaming 6.0 package')
-    parser.add_argument('--previous-package', type=Path, help='a wrtmesh 6.1 or 6.2 package with historical configuration paths')
+    parser.add_argument('--previous-package', type=Path, help='a wrtmesh 6.1/6.2 historical-path or 6.3 canonical-path package')
     args = parser.parse_args()
     test(shlex.split(args.apk), shlex.split(args.apk_builder or args.apk),
          args.package.resolve(), args.old_package.resolve() if args.old_package else None,

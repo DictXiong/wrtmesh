@@ -117,7 +117,8 @@ def fleet_config_ok:
   (.peers | type=="array" and length<=15) and
   (.peers | all(.[];
     (.id|section_token) and (.address|private_ipv4) and (.bridge_mac|mac) and .bridge_mac!=$c.self_mac and
-    (.bssids|type=="array" and length>=1 and length<=3 and all(.[];mac) and (unique|length)==length))) and
+    (.bssids|type=="array" and length<=3 and all(.[];mac) and (unique|length)==length) and
+    (if .auto==true then .bssids==[] else (.bssids|length)>=1 end))) and
   ([.peers[].id]|unique|length)==(.peers|length) and
   ([.peers[].address]|unique|length)==(.peers|length) and
   ([.peers[].bridge_mac]|unique|length)==(.peers|length) and
@@ -129,3 +130,5 @@ def public_ok($ssid; $peer_mac; $allowed):
   (.reports | type == "array" and length >= 1 and length <= 3 and
    all(.[]; report_ok($ssid) and (.bssid as $m | $allowed | index($m) != null)) and
    ([.[].bssid] | unique | length) == length);
+def public_auto_ok($ssid; $peer_mac):
+  . as $payload | public_ok($ssid; $peer_mac; [$payload.reports[]?.bssid]);

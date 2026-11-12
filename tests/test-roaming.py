@@ -60,7 +60,7 @@ def main():
         for source_name, staged_name in names.items():
             for dest in [stage / 'helper-v4', stage / 'tests/tree']:
                 shutil.copy2(source / source_name, dest / staged_name)
-        for suite in ['targeted.py', 'cache.py', 'fleet.py', 'dynamic.py']:
+        for suite in ['targeted.py', 'cache.py', 'fleet.py', 'dynamic.py', 'autossid.py']:
             result = subprocess.run([sys.executable, str(stage / 'tests' / suite)],
                                     env=env, timeout=180)
             if result.returncode:
@@ -70,7 +70,8 @@ def main():
         cache = json.loads((stage / 'cache-tests-result.json').read_text())
         fleet = json.loads((stage / 'fleet-tests-result.json').read_text())
         dynamic = json.loads((stage / 'dynamic-tests-result.json').read_text())
-        count = base['total'] + len(targeted['results']) - 1 + len(cache['results']) + len(fleet['results']) + len(dynamic['results'])
+        automatic = json.loads((stage / 'autossid-tests-result.json').read_text())
+        count = base['total'] + len(targeted['results']) - 1 + len(cache['results']) + len(fleet['results']) + len(dynamic['results']) + len(automatic['results'])
         result = {
             'passed': base['passed'] and targeted['passed'] and cache['passed'] and fleet['passed'] and dynamic['passed'],
             'scope': 'Local inert fixtures; no router or network-service calls.',
@@ -80,6 +81,7 @@ def main():
             'cache_groups': len(cache['results']),
             'fleet_groups': len(fleet['results']),
             'dynamic_groups': len(dynamic['results']),
+            'automatic_SSID_groups': len(automatic['results']),
             'total': count,
             'target_C7_ash_and_jq': bool(args.c7_rootfs),
             'skipped': [] if args.c7_rootfs else [

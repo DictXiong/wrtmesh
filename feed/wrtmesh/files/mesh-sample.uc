@@ -6,18 +6,29 @@ import * as ubus from 'ubus';
 import * as rtnl from 'rtnl';
 import * as mesh from '/usr/lib/wrtmesh/mesh.uc';
 
-let bus = ubus.connect(null, 1);
+let bus;
 let config = mesh.cursor();
 let overrides = mesh.overrides(config);
 
 if (ARGV[0] == 'roaming') {
-	let result = [];
-	for (let addr, p in overrides)
-		push(result, { id: mesh.peer_key(addr), bridge_mac: addr, address: p.address,
-			bssids: p.profiles[ARGV[1]] ?? [], disabled: p.disabled });
-	print(result, '\n');
+	print(mesh.roaming_overlay(config, ARGV[1], mesh.uptime()), '\n');
 	exit(0);
 }
+
+let connection = ubus.connect(null, 1), sample_cache = {};
+bus = {
+	list: pattern => connection?.list(pattern),
+	call: (object, method, args) => {
+		let key = object + ':' + method;
+		if ((method == 'get_status' && substr(object, 0, 8) == 'hostapd.') ||
+		    key == 'network.wireless:status') {
+			if (key in sample_cache)
+				return sample_cache[key];
+			return sample_cache[key] = connection?.call(object, method, args);
+		}
+		return connection?.call(object, method, args);
+	}
+};
 
 function write(name, value) {
 	let file = mesh.state + '/' + name + '.json';
@@ -217,6 +228,7 @@ let now = mesh.uptime();
 let peers = slice(filter(mesh.peer_inventory(config, overrides).peers, p => p.bridge_mac != node.bridge_mac), 0, mesh.limit);
 let neighbours4 = neighbours(rtnl.const.AF_INET);
 let local = mesh.bounded_snapshot({ version: 1, ...node, ...stations(neighbours4), ...topology(lan, peers, neighbours4),
+	roaming: mesh.local_roaming(config, bus, node.bridge_mac, now),
 	revision: trim(fs.readfile('/proc/sys/kernel/random/uuid', 40) ?? '') });
 write('local', { seen: now, data: local });
 
@@ -227,9 +239,20 @@ for (let p in peers) {
 	let old = previous[addr]?.address == p.address ? previous[addr] : null;
 	let result = mesh.fetch_response(lan, p.address, false);
 	let reply = mesh.snapshot(result.data, addr);
+	let identity = mesh.peer_binding(neighbours4, lan, p);
+	if (mesh.mac(result.data?.bridge_mac) && result.data.bridge_mac != addr)
+		identity = 'mismatch';
 	let received = mesh.uptime();
-	let entry = { address: p.address, seen: old?.seen, revision: old?.revision ?? old?.data?.revision,
+	let entry = { address: p.address, identity, report_seen: old?.report_seen ?? {},
+		seen: old?.seen, revision: old?.revision ?? old?.data?.revision,
 		status: result.status == 'ok' ? 'unavailable' : result.status };
+	if (reply && mesh.roaming_conflict(old?.data, reply))
+		reply = null;
+	if (reply) {
+		let record = mesh.report_anchors(old?.report_seen, reply, received);
+		if (record.valid) entry.report_seen = record.anchors;
+		else reply = null;
+	}
 	if (reply) {
 		if (reply.revision != entry.revision) {
 			entry.revision = reply.revision;

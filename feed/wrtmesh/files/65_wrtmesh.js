@@ -91,15 +91,7 @@ function linkName(link) {
 }
 
 function hostHint(station, hints, lookup) {
-	if (!hints)
-		return null;
-	const macs = new Set([station.mld, station.mac, ...clientLinks(station).map(link => link.mac)]);
-	for (const mac of macs) {
-		const value = mac && hints[lookup]?.(mac.toUpperCase());
-		if (value)
-			return value;
-	}
-	return null;
+	return wrtmesh.stationHint(station, hints, lookup);
 }
 
 function fields(items) {
@@ -114,7 +106,7 @@ function unique(items, value) {
 
 function clientDetails(client, links, hints) {
 	const stations = client.associations;
-	const name = stations.map(station => station.name || hostHint(station, hints, 'getHostnameByMACAddr')).find(Boolean);
+	const identity = wrtmesh.stationIdentity(stations, hints);
 	const macs = unique(stations, station => station.mac.toUpperCase());
 	const details = fields([
 		[_('IPv4 address'), unique(stations, station =>
@@ -147,7 +139,7 @@ function clientDetails(client, links, hints) {
 				openClients.delete(client.key);
 		}
 	}, [
-		E('summary', { title: _('Client details') }, [name || '?']),
+		E('summary', { title: _('Client details') }, [identity.label]),
 		details,
 		...linkDetails,
 		client.otherNodes.length ? E('p', { class: 'wrtmesh-secondary' }, [

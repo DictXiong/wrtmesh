@@ -2,6 +2,6 @@
 	"luci-app-wrtmesh": {
 		"description": "View Mesh status and discover peers",
 		"read": { "ubus": { "wrtmesh": [ "status", "configuration", "discover", "scan", "identify" ] } },
-		"write": { "ubus": { "wrtmesh": [ "save", "remove", "profile_save", "profile_remove" ] } }
+		"write": { "ubus": { "wrtmesh": [ "save", "remove", "profile_save", "profile_remove", "network_save", "peer_save" ] } }
 	}
 }
