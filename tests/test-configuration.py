@@ -300,6 +300,27 @@ export function error() {{ return null; }}
                    name='Peer', ssids=[]) == {'saved': True}
         selected = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == peer_mac)
         assert selected['ssids'] == [] and selected['profiles'] == {}
+        # Declarative automatic policy can live entirely in canonical UCI.
+        # LuCI edit/remove owns the separate override, preserving the producer.
+        uci("c.set('wrtmesh','_declarative_peer','peer');"
+            f"c.set('wrtmesh','_declarative_peer','bridge_mac','{peer_mac}');"
+            "c.set('wrtmesh','_declarative_peer','address','192.168.1.21');"
+            "c.set('wrtmesh','_declarative_peer','name','Declarative peer');"
+            "c.set('wrtmesh','_declarative_peer','ssid_mode','auto');"
+            "c.set('wrtmesh','_declarative_peer','roam_ssid',['Auto 家庭']);"
+            "c.commit('wrtmesh'); c.delete('wrtmesh_peers','p_020000000021'); c.commit('wrtmesh_peers');")
+        producer = json.loads(uci("print(c.get_all('wrtmesh','_declarative_peer'));"))
+        selected = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == peer_mac)
+        assert selected['automatic'] and selected['ssids'] == ['Auto 家庭']
+        producer_bytes = (config / 'wrtmesh').read_bytes()
+        assert rpc('remove', bridge_mac=peer_mac) == {'saved': True}
+        assert all(p['bridge_mac'] != peer_mac for p in rpc('status')['peers'])
+        assert (config / 'wrtmesh').read_bytes() == producer_bytes
+        assert rpc('peer_save', address='192.168.1.21', bridge_mac=peer_mac,
+                   name='Locally edited', ssids=['Auto 家庭']) == {'saved': True}
+        assert json.loads(uci("print(c.get_all('wrtmesh','_declarative_peer'));")) == producer
+        selected = next(p for p in rpc('status')['peers'] if p['bridge_mac'] == peer_mac)
+        assert selected['name'] == 'Locally edited' and selected['ssids'] == ['Auto 家庭']
         for item in rpc('configuration')['profiles']:
             assert rpc('profile_remove', id=item['id']) == {'saved': True}
         wireless.write_bytes(original_wireless)

@@ -33,7 +33,8 @@ def main():
         parser.error('jq is required')
     source = args.package_root.resolve() / 'files'
     names = {'helper.sh': 'helper.sh', 'common.jq': 'common.jq',
-             'cli-report.jq': 'cli-report.jq', 'wrtmesh.init': 'init.sh'}
+             'cli-report.jq': 'cli-report.jq', 'wrtmesh.init': 'init.sh',
+             'mesh.uc': 'mesh.uc', 'mesh-sample.uc': 'mesh-sample.uc'}
     for name in names:
         if not (source / name).is_file():
             parser.error(f'missing package input: {source / name}')

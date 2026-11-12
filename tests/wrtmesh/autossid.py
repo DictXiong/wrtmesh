@@ -186,6 +186,99 @@ def legacy_single_proof():
         m.close()
 
 
+def provisioned_automatic_without_overrides():
+    m = Dynamic(profile='sensor', shell=C7 if ROOT else SHELL)
+    try:
+        # This is the actual new producer layout: the worker does not carry
+        # peer_mode, peers, peer, peer_mac or any manually approved BSSID.
+        for key in ['peer', 'peer_mac', 'peer_bssid', 'peer_mode', 'peers']:
+            m.profiles['sensor'].pop(key, None)
+        m.save_multi()
+        (m.cfgdir / 'wrtmesh_peers').write_text('# no LuCI overrides\n')
+        m.lan.update(proto='static', l3_device='br-lan',
+                     **{'ipv4-address': [{'address': '10.24.0.20', 'mask': 24}]})
+        m.save_lan()
+        native = m.p / 'native-config'
+        native.mkdir()
+        (native / 'wrtmesh_peers').write_text('# no LuCI overrides\n')
+        (native / 'wireless').write_text("config wifi-iface 'ssid_sensor'\n option mode 'ap'\n option ssid 'ESS-sensor'\n option encryption 'psk2'\n option network 'lan'\n")
+        roaming = "config roaming 'sensor'\n option section 'ssid_sensor'\n option enabled '1'\n option iface 'ap-xf00abc12'\n option mlo '0'\n option max_links '1'\n option interval '30'\n option ttl '180'\n"
+        (native / 'wrtmesh').write_text(roaming)
+        cache = m.p / 'mesh-cache'
+        cache.mkdir()
+        plan = m.p / 'managed-fallback.json'
+        plan.write_text('[]')
+        ucode = m.bin / 'ucode'
+        if ROOT:
+            module = m.p / 'actual-mesh.uc'
+            module.write_text((namespace['S'] / 'mesh.uc').read_text()
+                              .replace('/tmp/wrtmesh-private/mesh', str(cache))
+                              .replace('/tmp/wrtmesh-public/', str(m.public) + '/')
+                              .replace('/proc/uptime', str(m.clock))
+                              .replace('return uci.cursor();', f"return uci.cursor('{native}','{m.deltadir}');"))
+            sampler = m.p / 'actual-mesh-sample.uc'
+            sampler.write_text((namespace['S'] / 'mesh-sample.uc').read_text()
+                               .replace('/usr/lib/wrtmesh/mesh.uc', str(module)))
+            command = [namespace['QEMU'], '-L', str(ROOT), str(ROOT / 'usr/bin/ucode'),
+                       '-L', str(ROOT / 'usr/lib/ucode/*.so'), str(sampler)]
+            ucode.write_text('#!/bin/sh\nshift\nexec ' + shlex.join(command) + ' "$@"\n')
+        else:
+            ucode.write_text('#!/bin/sh\ncat ' + shlex.quote(str(plan)) + '\n')
+        ucode.chmod(0o700)
+        m.helper.write_text(m.helper.read_text().replace('/usr/bin/ucode', str(ucode)))
+        m.call()
+        assert m.view()['state'] == 'ok'
+        assert m.table('sensor') == [] and m.pub('sensor').is_file()
+        assert json.loads((m.state_path('sensor') / 'config.json').read_text())['peers'] == []
+
+        envelope = json.loads((m.http / 'sensor.json').read_text())
+        peer = {'address': '10.24.0.10', 'bridge_mac': envelope['bridge_mac'],
+                'ssid_mode': 'auto', 'roam_ssid': ['ESS-sensor']}
+        m.peers['_producer_node'] = peer
+        m.save_multi()
+        (native / 'wrtmesh').write_text(roaming + "\nconfig peer '_producer_node'\n option address '10.24.0.10'\n option bridge_mac '" + peer['bridge_mac'] + "'\n option ssid_mode 'auto'\n list roam_ssid 'ESS-sensor'\n")
+        digest = hashlib.sha256('\n'.join(sorted(row['bssid'] + ':' + row['nr'] for row in envelope['reports'])).encode()).hexdigest()
+        part = {'source': 'remote_different_id', 'envelope': envelope, 'digest': digest, 'age': 0, 'ttl': 95}
+        value = {peer['bridge_mac']: {'address': peer['address'], 'identity': 'verified',
+                 'seen': 100, 'status': 'fresh', 'revision': '22222222-2222-4222-8222-222222222222',
+                 'data': {'roaming': [{'ssid': 'ESS-sensor', 'security': {'auth': 'psk2', 'cipher': 'ccmp', 'pmf': 0, 'ft': False, 'domain': None}, 'parts': [part]}]}}}
+        (cache / 'peers.json').write_text(json.dumps(value))
+        managed = {'id': 'p_' + peer['bridge_mac'].replace(':', ''), 'address': peer['address'],
+                   'bridge_mac': peer['bridge_mac'], 'auto': True, 'disabled': False, 'bssids': [],
+                   'reason': 'ready', 'revision': value[peer['bridge_mac']]['revision'],
+                   'parts': [{**part, 'seen': 100}]}
+        plan.write_text(json.dumps([managed]))
+        m.at(100)
+        m.call()
+        status = m.view()
+        assert status['state'] == 'ok' and len(m.table('sensor')) == 1, status
+        assert status['applied_peers'][0]['digests'] == [digest]
+        assert not m.curl_log.exists(), 'declarative policy must reuse the same cached exchange'
+        assert (m.cfgdir / 'wrtmesh_peers').read_text() == '# no LuCI overrides\n'
+
+        # The native backend applies a GUI tombstone over the declaration.
+        (native / 'wrtmesh_peers').write_text("config peer '" + managed['id'] + "'\n option bridge_mac '" + peer['bridge_mac'] + "'\n option disabled '1'\n")
+        plan.write_text(json.dumps([{**managed, 'disabled': True, 'parts': []}]))
+        m.at(130)
+        m.call()
+        assert m.table('sensor') == [] and m.view()['applied_peers'] == []
+        # Removing the declared peer returns to a valid single-node worker.
+        m.peers.clear()
+        m.save_multi()
+        (native / 'wrtmesh').write_text(roaming)
+        m.at(160)
+        m.call()
+        assert m.view()['state'] == 'ok' and m.pub('sensor').is_file()
+        assert m.table('sensor') == [] and not m.curl_log.exists()
+        return {'empty_overrides_declarative_auto_applies': True,
+                'worker_has_no_manual_peer_or_pins': True, 'single_node_is_valid': True,
+                'luci_tombstone_withdraws_declared_peer': True, 'no_extra_http': True,
+                'actual_target_backend_and_worker': bool(ROOT), 'target_C7': bool(ROOT)}
+    finally:
+        m.close()
+
+
 check('automatic_SSID_cache_rotation_expiry_and_applied_proof', automatic_rotation)
 check('legacy_single_peer_application_evidence', legacy_single_proof)
+check('declarative_SSID_policy_without_LuCI_overrides', provisioned_automatic_without_overrides)
 (R / 'autossid-tests-result.json').write_text(json.dumps({'passed': True, 'results': results}, indent=2) + '\n')

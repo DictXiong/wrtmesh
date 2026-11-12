@@ -164,7 +164,10 @@ load_config() {
     peer_bssids:($allowed|ascii_downcase|split(" ")|map(select(length>0))),
     interval:$interval,ttl:$ttl} |
     if $peer_mode=="fleet" then del(.peer,.peer_mac,.peer_bssids)+{peer_mode:"fleet",peers:$peers[0]} else . end' > "$STATE/config.next" || return 1
- if [ -r "$CONFIGDIR/wrtmesh_peers" ] && grep -q '^config[[:space:]]' "$CONFIGDIR/wrtmesh_peers"; then
+ # The canonical file can declare automatic peers without any LuCI overrides.
+ # Querying this local policy never performs a network scan or extra fetch.
+ if { [ -r "$CONFIGDIR/wrtmesh_peers" ] && grep -q '^config[[:space:]]' "$CONFIGDIR/wrtmesh_peers"; } ||
+    "$UCI" -q show wrtmesh 2>/dev/null | grep -q "\.ssid_mode="; then
   "$TIMEOUT" 5 /usr/bin/ucode "$ROOT/mesh-sample.uc" roaming "$ROAM_PROFILE" > "$STATE/mesh.peers" || return 1
   if "$JQ" -e 'type=="array" and length>0' "$STATE/mesh.peers" >/dev/null; then
    if [ -z "$bridge_mac" ]; then

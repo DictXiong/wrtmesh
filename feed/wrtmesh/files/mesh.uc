@@ -554,21 +554,41 @@ export function overrides(cursor) {
 	return result;
 }
 
+// Declarative peers and LuCI overrides share one effective policy. Explicit
+// local overrides (including tombstones) win by bridge identity. Invalid or
+// conflicting declarative automatic policy is represented by a withdrawal,
+// never by falling back to historical BSSID pins.
 export function peer_inventory(cursor, overlay) {
-	let provisioned = {}, legacy = {}, conflicts = {};
+	let provisioned = {}, legacy = {}, conflicts = {}, automatic = {};
 	cursor.foreach('wrtmesh', 'peer', s => { provisioned[s['.name']] = s; });
 	for (let id, p in provisioned) {
 		let addr = mac(p.bridge_mac);
-		if (!addr || !private_ip(p.address))
+		if (!addr)
 			continue;
-		if (legacy[addr] && legacy[addr].address != p.address)
+		let auto = p.ssid_mode == 'auto';
+		if (p.ssid_mode != null) automatic[addr] = true;
+		let ssids = ssid_list(type(p.roam_ssid) == 'string' ? [p.roam_ssid] : p.roam_ssid ?? []);
+		if (!private_ip(p.address) || (p.ssid_mode != null && !auto) || (auto && ssids == null))
 			conflicts[addr] = true;
-		legacy[addr] ??= { bridge_mac: addr, address: p.address, name: label(p.name, 64) ?? '', profiles: {} };
+		let candidate = { bridge_mac: addr, address: p.address, name: label(p.name, 64) ?? '',
+			profiles: {}, automatic: auto, ssids: auto ? ssids ?? [] : [], disabled: p.disabled == '1' };
+		let previous = legacy[addr];
+		if (previous && (previous.address != p.address || previous.automatic != auto ||
+		    previous.disabled != candidate.disabled || (auto &&
+		    sprintf('%J', sort(previous.ssids)) != sprintf('%J', sort(candidate.ssids)))))
+			conflicts[addr] = true;
+		legacy[addr] ??= candidate;
+		if (auto)
+			continue;
 		for (let option, raw in p) {
 			let m = match(option, /^([A-Za-z][A-Za-z0-9_]{0,47})_bssid$/);
 			let list = m ? pins(raw) : null;
-			if (list)
+			if (list) {
+				let before = legacy[addr].profiles[m[1]];
+				if (before && sprintf('%J', sort(before)) != sprintf('%J', sort(list)))
+					conflicts[addr] = true;
 				legacy[addr].profiles[m[1]] = list;
+			}
 		}
 	}
 	cursor.foreach('wrtmesh', 'roaming', s => {
@@ -585,13 +605,30 @@ export function peer_inventory(cursor, overlay) {
 			legacy[addr] ??= { bridge_mac: addr, address: p.address, name: '', profiles: {} };
 			if (legacy[addr].address != p.address)
 				conflicts[addr] = true;
-			legacy[addr].profiles[id] = list;
+			if (!legacy[addr].automatic)
+				legacy[addr].profiles[id] = list;
 		}
 	});
-	let effective = { ...legacy, ...overlay };
+	let effective = { ...legacy, ...overlay }, addresses = {}, duplicate_address = {};
+	for (let addr, p in effective) {
+		if (p.disabled || !private_ip(p.address) || (conflicts[addr] && !overlay[addr]))
+			continue;
+		let other = addresses[p.address];
+		if (other && other != addr)
+			duplicate_address[addr] = duplicate_address[other] = true;
+		addresses[p.address] = addr;
+	}
+	let managed = {};
+	for (let addr in keys(automatic)) {
+		let p = effective[addr];
+		managed[addr] = { ...p, automatic: true, ssids: p.automatic ? p.ssids : [],
+			disabled: !!(p.disabled || !private_ip(p.address) || conflicts[addr] || duplicate_address[addr]) };
+	}
+	for (let addr, p in overlay)
+		managed[addr] = { ...p, disabled: !!(p.disabled || !private_ip(p.address) || duplicate_address[addr]) };
 	let peers = filter(values(effective), p => !p.disabled && private_ip(p.address) &&
-		(!conflicts[p.bridge_mac] || overlay[p.bridge_mac]));
-	return { legacy, peers };
+		!duplicate_address[p.bridge_mac] && (!conflicts[p.bridge_mac] || overlay[p.bridge_mac]));
+	return { legacy, peers, managed };
 }
 
 export function selected_ssids(peer, networks) {
@@ -630,7 +667,7 @@ export function roaming_overlay(cursor, id, now, existing_cache, known_own) {
 	for (let network in networks)
 		if (length(filter(network.profiles, p => p.id == id)))
 			target = network;
-	let overlays = overrides(cursor);
+	let overlays = peer_inventory(cursor, overrides(cursor)).managed;
 	let cache = existing_cache ?? read_json(state + '/peers.json', cache_limit) ?? {};
 	let own = {};
 	for (let names in values(known_own ?? local_profile_bssids_from_public(cursor)))

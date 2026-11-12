@@ -43,7 +43,9 @@ with open({str(self.uci_log)!r},"a")as f:f.write(k+"\\n")
 if "show" in a:
  if k=="wrtmesh":
   for name in v["profiles"]:print("wrtmesh."+name+"=roaming")
-  for name in v["peers"]:print("wrtmesh."+name+"=peer")
+  for name,definition in v["peers"].items():
+   print("wrtmesh."+name+"=peer")
+   if "ssid_mode" in definition:print("wrtmesh."+name+".ssid_mode="+repr(definition["ssid_mode"]))
  else:print("network.@device[0]=device")
 elif k=="network.@device[0].name":print("br-lan")
 elif k=="network.@device[0].macaddr":print("02:00:00:00:00:02")

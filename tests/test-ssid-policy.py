@@ -432,6 +432,122 @@ def run_status_tests(root, qemu):
         expect('legacy-pin-applied-subsets', execute(entry, legacy_workers, peers=[legacy]), 'active', 'ready')
         legacy_workers[profiles[1]]['applied_peers'][0]['bssids'] = [bssid_set[1], '02:00:00:09:00:01']
         expect('legacy-pin-forbids-foreign-applied-bssid', execute(entry, legacy_workers, peers=[legacy]), 'pending', 'awaiting_apply')
+        # A declarative automatic peer must follow the same cache/ARP/proof
+        # path when no LuCI peer override has ever been created.
+        execute(entry, workers)
+
+        def declaration(label='_provisioned_node', address=peer_address, mac=bridge,
+                        names=(ssid,), mode='auto', disabled=False, pins=False):
+            value = (f"\nconfig peer '{label}'\n option bridge_mac '{mac}'\n"
+                     f" option address '{address}'\n option name 'Provisioned AP'\n")
+            if mode is not None:
+                value += f" option ssid_mode '{mode}'\n"
+            if disabled:
+                value += " option disabled '1'\n"
+            for name in names:
+                value += f" list roam_ssid '{name}'\n"
+            if pins:
+                value += f" list {profiles[0]}_bssid '{bssid_set[0]}'\n"
+            return value
+
+        def override(address=peer_address, names=(ssid,), *, disabled=False, automatic=True):
+            value = (f"config peer 'p_020000000021'\n option bridge_mac '{bridge}'\n"
+                     f" option address '{address}'\n option name 'Local override'\n")
+            if disabled:
+                return value + " option disabled '1'\n"
+            if automatic:
+                value += " option ssid_mode 'auto'\n"
+                for name in names:
+                    value += f" list roam_ssid '{name}'\n"
+            else:
+                value += f" list {profiles[0]}_bssid '{bssid_set[0]}'\n"
+            return value
+
+        def inventory(declarations, local='# empty\n', extra_roaming=''):
+            (config / 'wrtmesh').write_text(roaming_config + declarations + extra_roaming)
+            (config / 'wrtmesh_peers').write_text(local)
+            script = ("import * as uci from 'uci';"
+                      f"import * as mesh from '{staged_source}';"
+                      f"let c=uci.cursor('{config}','{delta}');"
+                      "let inventory=mesh.peer_inventory(c,mesh.overrides(c));"
+                      f"let cache={json.dumps({bridge: entry})};"
+                      f"let plan=mesh.roaming_overlay(c,'{profiles[0]}',100,cache,{{}});"
+                      "for (let p in inventory.peers) {p.status='fresh';p.age=0;p.updated_at=1000;}"
+                      "print({inventory,plan,peers:mesh.roaming_status(c,inventory.peers,cache,100,1000)});")
+            result = subprocess.run(command + ['-e', script], text=True, capture_output=True,
+                                    timeout=10, check=False)
+            assert result.returncode == 0, result.stderr
+            return json.loads(result.stdout)
+
+        value = inventory(declaration())
+        assert len(value['peers']) == 1 and value['peers'][0]['automatic']
+        assert value['peers'][0]['ssids'] == [ssid] and value['peers'][0]['profiles'] == {}
+        assert value['peers'][0]['roaming'][0]['state'] == 'active'
+        assert value['plan'][0]['auto'] and value['plan'][0]['disabled'] is False
+        assert value['plan'][0]['reason'] == 'ready' and len(value['plan'][0]['parts']) == 2
+        checked.append('provisioned-auto-with-empty-luci-overrides-reaches-applied-status')
+
+        value = inventory(declaration(names=()))
+        assert len(value['peers']) == 1 and value['peers'][0]['ssids'] == []
+        assert value['plan'][0]['disabled'] is True and value['plan'][0]['parts'] == []
+        checked.append('provisioned-empty-ssid-policy-preserves-node-but-withdraws-roaming')
+
+        value = inventory(declaration(), override(names=()))
+        assert value['peers'][0]['ssids'] == [] and value['plan'][0]['disabled'] is True
+        checked.append('luci-empty-selection-overrides-provisioned-auto-policy')
+        value = inventory(declaration(), override(address='192.168.1.22'))
+        assert value['peers'][0]['address'] == '192.168.1.22'
+        assert value['plan'][0]['reason'] != 'ready' and value['plan'][0]['parts'] == []
+        checked.append('luci-address-override-cannot-reuse-previous-address-cache')
+        value = inventory(declaration(), override(automatic=False))
+        assert value['peers'][0]['automatic'] is False
+        assert not value['plan'][0].get('auto') and value['plan'][0]['bssids'] == [bssid_set[0]]
+        checked.append('explicit-legacy-luci-policy-overrides-provisioned-auto')
+        value = inventory(declaration(), override(disabled=True))
+        assert value['peers'] == [] and value['plan'][0]['disabled'] is True
+        checked.append('luci-tombstone-masks-provisioned-auto-node')
+
+        for name, declarations in (
+            ('different-address', declaration() + declaration('duplicate', address='192.168.1.22')),
+            ('different-ssid-policy', declaration() + declaration('duplicate', names=('Other SSID',))),
+            ('mixed-auto-and-legacy', declaration() + declaration('duplicate', mode=None, pins=True)),
+            ('malformed-ssid-list', declaration(names=(ssid, ssid))),
+            ('unknown-policy-mode', declaration(mode='invalid', pins=True)),
+        ):
+            value = inventory(declarations)
+            assert value['peers'] == [], (name, value)
+            assert value['plan'][0]['disabled'] is True and value['plan'][0]['parts'] == [], (name, value)
+            checked.append('conflicting-provisioned-policy-withdraws-' + name)
+        value = inventory(declaration() + declaration('identical'))
+        assert len(value['peers']) == 1 and value['plan'][0]['reason'] == 'ready'
+        checked.append('equivalent-duplicate-provisioned-policy-merges-by-identity')
+        value = inventory(declaration() + declaration('duplicate', address='192.168.1.22'), override())
+        assert len(value['peers']) == 1 and value['plan'][0]['reason'] == 'ready'
+        checked.append('explicit-luci-policy-resolves-conflicting-provisioned-identity')
+        other = '02:00:00:00:00:22'
+        value = inventory(declaration() + declaration('other', mac=other))
+        assert value['peers'] == [] and len(value['plan']) == 2
+        assert all(p['disabled'] is True for p in value['plan'])
+        checked.append('same-address-different-identities-cannot-bypass-automatic-policy')
+        value = inventory(declaration() + declaration('other', mac=other), override(address='192.168.1.22'))
+        assert len(value['peers']) == 2
+        assert {p['address'] for p in value['peers']} == {peer_address, '192.168.1.22'}
+        checked.append('address-override-resolves-cross-identity-address-conflict')
+        value = inventory(declaration(disabled=True))
+        assert value['peers'] == [] and value['plan'][0]['disabled'] is True
+        checked.append('disabled-provisioned-auto-is-a-withdrawal')
+        value = inventory(declaration(mode=None, pins=True))
+        assert len(value['peers']) == 1 and value['peers'][0]['profiles'] == {profiles[0]: [bssid_set[0]]}
+        assert value['plan'] == []
+        checked.append('standalone-legacy-pins-remain-outside-automatic-managed-overlay')
+        # A historical embedded peer reference is not a second declaration of
+        # policy and must not make an explicit automatic declaration fall back.
+        embedded = (f"\nconfig roaming 'old_reference'\n option enabled '0'\n"
+                    f" option peer '{peer_address}'\n option peer_mac '{bridge}'\n"
+                    f" list peer_bssid '{bssid_set[0]}'\n")
+        value = inventory(declaration(pins=True), extra_roaming=embedded)
+        assert value['peers'][0]['profiles'] == {} and value['plan'][0]['reason'] == 'ready'
+        checked.append('automatic-declaration-shields-leftover-legacy-pin-references')
     return checked
 
 

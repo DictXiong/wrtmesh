@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.4.0-r1.apk
+apk add ./wrtmesh-6.4.1-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
@@ -130,6 +130,30 @@ users no longer choose or coordinate their internal IDs. Unsupported older
 peers retain station/topology display where possible; automatic SSID roaming
 shows that a peer upgrade is needed. Migrated pinned legacy relationships
 continue to use their earlier bounded protocol.
+
+### Declarative provisioning
+
+Starting with 6.4.1, a provisioner can put automatic peer policy in
+`/etc/config/wrtmesh`. Each peer needs its management LAN IPv4, bridge MAC,
+`option ssid_mode 'auto'` and a `list roam_ssid` for each allowed SSID. Local
+`config roaming` sections describe only local collectors; their internal names
+do not need to match another node. Do not provision learned BSSIDs.
+
+```uci
+config peer 'managed_peer'
+        option address '192.168.1.2'
+        option bridge_mac '02:00:00:00:00:02'
+        option ssid_mode 'auto'
+        list roam_ssid 'Home'
+```
+
+The provisioner must also enable the local collectors for the selected SSIDs.
+LuCI continues to own `/etc/config/wrtmesh_peers`; its per-MAC edits and deletion
+markers take precedence over provisioned policy. Keep that file outside the
+provisioner's ownership so software installation and configuration deployments
+preserve local overrides. An empty SSID selection retains station and topology
+exchange without enabling roaming. Both sources use the same cache validation,
+IP/MAC checks, expiry rules and hostapd application evidence.
 
 ## Behavior
 
