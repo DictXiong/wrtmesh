@@ -133,21 +133,29 @@
 	white-space: nowrap;
 }
 
+.wrtmesh-client-statuses {
+	display: flex;
+	flex-wrap: wrap;
+	gap: .4rem 1.4rem;
+	margin-block: .6rem;
+}
+
 .wrtmesh-client-group {
-	border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-	margin-block: .75rem;
-	padding-block: .5rem;
+	max-width: 100%;
 }
 
 .wrtmesh-client-group h5 {
-	margin-block: .25rem;
+	margin: 0;
+	font-size: inherit;
 	overflow-wrap: anywhere;
 }
 
 .wrtmesh-client-state {
 	display: flex;
 	flex-wrap: wrap;
-	gap: .25rem .8rem;
+	gap: .2rem .65rem;
+	margin-block: .15rem;
+	font-size: .9em;
 }
 
 .wrtmesh-client-state[data-state="forbidden"] > span,
@@ -156,48 +164,130 @@
 	font-weight: 600;
 }
 
-.wrtmesh-client-table .td {
+.wrtmesh-client-list {
+	container: wrtmesh-clients / inline-size;
+	max-width: 100%;
+	min-width: 0;
+}
+
+.wrtmesh-client-table {
+	width: 100%;
+	table-layout: fixed;
+}
+
+.table.wrtmesh-client-table .tr .td,
+.table.wrtmesh-client-table .tr.table-titles .th {
+	padding: .5rem .55rem;
+	text-align: start;
 	vertical-align: top;
-}
-
-.wrtmesh-client-details > summary {
-	cursor: pointer;
-	font-weight: 600;
 	overflow-wrap: anywhere;
 }
 
-.wrtmesh-client-fields {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr);
-	gap: .2rem .55rem;
-	margin-block: .45rem;
+.table.wrtmesh-client-table .tr.table-titles .th {
+	white-space: normal;
 }
 
-.wrtmesh-client-fields dd {
-	margin: 0;
-	overflow-wrap: anywhere;
-}
+.wrtmesh-client-table .th:nth-child(1) { width: 27%; }
+.wrtmesh-client-table .th:nth-child(2) { width: 18%; }
+.wrtmesh-client-table .th:nth-child(3) { width: 22%; }
+.wrtmesh-client-table .th:nth-child(4) { width: 13%; }
+.wrtmesh-client-table .th:nth-child(5) { width: 20%; }
+.wrtmesh-client-diagnostics .th:nth-child(1) { width: 15%; }
+.wrtmesh-client-diagnostics .th:nth-child(2) { width: 14%; }
+.wrtmesh-client-diagnostics .th:nth-child(3) { width: 14%; }
+.wrtmesh-client-diagnostics .th:nth-child(4) { width: 14%; }
+.wrtmesh-client-diagnostics .th:nth-child(5) { width: 19%; }
+.wrtmesh-client-diagnostics .th:nth-child(6) { width: 11%; }
+.wrtmesh-client-diagnostics .th:nth-child(7) { width: 13%; }
 
-.wrtmesh-client-link-detail {
-	margin-block: .6rem;
-}
-
-.wrtmesh-client-link-list > div {
-	display: flex;
+.wrtmesh-client-table .wrtmesh-network {
+	display: inline-flex;
 	align-items: center;
-	min-height: 2.8em;
+	gap: .4rem;
+	max-width: 100%;
+	min-width: 0;
+	margin: 0;
+	white-space: normal;
 }
 
-.wrtmesh-client-mobile-label {
-	display: none;
+.wrtmesh-client-table .wrtmesh-network > img {
+	flex: none;
 }
 
-@media (max-width: 42rem) {
-	.wrtmesh-client-table,
-	.wrtmesh-client-table > tbody,
-	.wrtmesh-client-table > tbody > .tr {
+.wrtmesh-client-table .wrtmesh-network > span,
+.wrtmesh-client-table .wrtmesh-network small {
+	min-width: 0;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-client-table .wrtmesh-network small {
+	margin-top: .1rem;
+	font-size: .85em;
+}
+
+.wrtmesh-client-mac,
+.wrtmesh-host,
+.wrtmesh-client-radio,
+.wrtmesh-client-interface {
+	display: block;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-client-mac > span,
+.wrtmesh-client-interface > span,
+.wrtmesh-link-label {
+	display: block;
+}
+
+.wrtmesh-client-address {
+	font-variant-numeric: tabular-nums;
+}
+
+.wrtmesh-client-table .wrtmesh-secondary {
+	font-size: .85em;
+	line-height: 1.4;
+}
+
+.wrtmesh-client-table .wrtmesh-signal {
+	min-width: 0;
+	margin: 0;
+	padding: .15rem .35rem;
+	gap: .25rem;
+	white-space: nowrap;
+}
+
+.wrtmesh-client-table .wrtmesh-signal img {
+	width: 16px;
+	height: 16px;
+	margin: 0;
+}
+
+.wrtmesh-client-link-row .td {
+	border-top: 0;
+	padding-block: .35rem;
+}
+
+.wrtmesh-client-link-row .wrtmesh-client-radio-cell {
+	border-inline-start: 2px solid color-mix(in srgb, currentColor 18%, transparent);
+}
+
+.wrtmesh-client-entry + .wrtmesh-client-entry {
+	border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+}
+
+@media (max-width: 68rem) {
+	.wrtmesh-client-diagnostics .td,
+	.wrtmesh-client-diagnostics .th {
+		padding-inline: .35rem;
+		font-size: .9em;
+	}
+}
+
+@container wrtmesh-clients (max-width: 52rem) {
+	.wrtmesh-client-table {
 		display: block;
-		width: 100%;
 	}
 
 	.wrtmesh-client-table > thead {
@@ -208,25 +298,48 @@
 		clip-path: inset(50%);
 	}
 
-	.wrtmesh-client-table > tbody > .tr {
-		margin-block: .6rem;
-		padding-block: .35rem;
+	.wrtmesh-client-table > .wrtmesh-client-entry {
+		display: block;
+		margin-block: .5rem;
 		border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
 		border-radius: .4rem;
 	}
 
-	.wrtmesh-client-table > tbody > .tr > .td {
+	.wrtmesh-client-table .wrtmesh-client-summary,
+	.wrtmesh-client-table .wrtmesh-client-link-row {
 		display: grid;
-		grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-		gap: .6rem;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		width: 100%;
-		text-align: start;
-		overflow-wrap: anywhere;
 	}
 
-	.wrtmesh-client-mobile-label {
+	.wrtmesh-client-table .wrtmesh-client-entry .td {
 		display: block;
+		min-width: 0;
+		width: auto;
+		padding: .4rem .55rem;
+		font-size: inherit;
+		text-align: start;
+	}
+
+	.wrtmesh-client-table .wrtmesh-client-entry .td::before {
+		content: attr(data-label);
+		display: block;
+		margin-bottom: .15rem;
+		font-size: .8em;
 		font-weight: 600;
+		opacity: .8;
+	}
+
+	.wrtmesh-client-table .wrtmesh-client-host-cell {
+		grid-column: 1 / -1;
+	}
+
+	.wrtmesh-client-link-row {
+		border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+	}
+
+	.wrtmesh-client-link-row .wrtmesh-client-radio-cell {
+		border-inline-start: 0;
 	}
 }
 

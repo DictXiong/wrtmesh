@@ -9,8 +9,6 @@ const checkAccess = rpc.declare({
 	expect: { access: false }, raise: true
 });
 
-const openClients = new Set();
-
 function snapshotState(peer) {
 	return peer.status || (peer.online && peer.data ? 'fresh' : 'unknown');
 }
@@ -72,114 +70,6 @@ function groupClients(data) {
 	return groups.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function clientLinks(station) {
-	return station.links?.length ? station.links : [station];
-}
-
-function linkName(link) {
-	let band = null;
-	if (link.freq >= 2400 && link.freq < 2500)
-		band = _('2.4 GHz');
-	else if (link.freq >= 4900 && link.freq < 5925)
-		band = _('5 GHz');
-	else if (link.freq >= 5925 && link.freq <= 7125)
-		band = _('6 GHz');
-	else if (link.freq >= 57000 && link.freq <= 71000)
-		band = _('60 GHz');
-
-	return [band, link.id != null ? _('Link %d').format(link.id) : null].filter(Boolean).join(' · ') || '—';
-}
-
-function hostHint(station, hints, lookup) {
-	return wrtmesh.stationHint(station, hints, lookup);
-}
-
-function fields(items) {
-	return E('dl', { class: 'wrtmesh-client-fields' }, items
-		.filter(([, value]) => value != null && value !== '')
-		.flatMap(([label, value]) => [E('dt', {}, [label]), E('dd', {}, [String(value)])]));
-}
-
-function unique(items, value) {
-	return [...new Set(items.map(value).filter(Boolean))];
-}
-
-function clientDetails(client, links, hints) {
-	const stations = client.associations;
-	const identity = wrtmesh.stationIdentity(stations, hints);
-	const macs = unique(stations, station => station.mac.toUpperCase());
-	const details = fields([
-		[_('IPv4 address'), unique(stations, station =>
-			station.ipv4 || hostHint(station, hints, 'getIPAddrByMACAddr')).join(', ')],
-		[_('IPv6 address'), unique(stations, station =>
-			station.ipv6 || hostHint(station, hints, 'getIP6AddrByMACAddr')).join(', ')],
-		[_('MAC address'), macs.join(', ')],
-		[_('MLD address'), stations[0].mld?.toUpperCase()],
-		[_('Wireless interface'), unique(stations, station => station.iface).join(', ')]
-	]);
-	const linkDetails = links
-		.filter(link => link.ap_mld || link.bssid || link.channel != null ||
-			link.freq != null || (link.mac && !macs.includes(link.mac.toUpperCase())))
-		.map(link => E('div', { class: 'wrtmesh-client-link-detail' }, [
-			E('strong', {}, [link.label]),
-			fields([
-				[_('MAC address'), link.mac && !macs.includes(link.mac.toUpperCase()) ? link.mac.toUpperCase() : null],
-				[_('AP MLD address'), link.ap_mld?.toUpperCase()],
-				[_('BSSID'), link.bssid?.toUpperCase()],
-				[_('Channel'), link.channel],
-				[_('Frequency'), link.freq != null ? '%d %s'.format(link.freq, _('MHz')) : null]
-			])
-		]));
-	return E('details', {
-		class: 'wrtmesh-client-details', open: openClients.has(client.key) ? '' : null,
-		toggle: event => {
-			if (event.currentTarget.open)
-				openClients.add(client.key);
-			else
-				openClients.delete(client.key);
-		}
-	}, [
-		E('summary', { title: _('Client details') }, [identity.label]),
-		details,
-		...linkDetails,
-		client.otherNodes.length ? E('p', { class: 'wrtmesh-secondary' }, [
-			_('Also reported by %s').format(client.otherNodes.join(', '))
-		]) : null
-	]);
-}
-
-function clientCell(title, contents) {
-	return E('td', { class: 'td', role: 'cell' }, [
-		E('span', { class: 'wrtmesh-client-mobile-label', 'aria-hidden': 'true' }, [title]),
-		contents
-	]);
-}
-
-function clientTable(group, hints) {
-	const headings = [_('Client name'), _('SSID'), _('Band / MLO link'), _('Signal'), _('Negotiated rate (AP RX / TX)')];
-	const rows = group.clients.map(client => {
-		const ssids = unique(client.associations, station => station.ssid);
-		const links = client.associations.flatMap(station => clientLinks(station).map(link => ({
-			...link, ap_mld: station.ap_mld,
-			label: ssids.length > 1 && station.ssid ? linkName(link) + ' · ' + station.ssid : linkName(link)
-		})));
-		const linkRows = render => E('div', { class: 'wrtmesh-client-link-list' },
-			links.map(link => E('div', {}, [render(link)])));
-		return E('tr', { class: 'tr', role: 'row', 'data-client': client.key }, [
-			clientCell(headings[0], clientDetails(client, links, hints)),
-			clientCell(headings[1], E('span', {}, [ssids.join(', ') || '—'])),
-			clientCell(headings[2], linkRows(link => link.label)),
-			clientCell(headings[3], linkRows(link => wrtmesh.stationSignal(link.signal))),
-			clientCell(headings[4], linkRows(link => wrtmesh.stationRates(link, true)))
-		]);
-	});
-	return E('table', { class: 'table wrtmesh-client-table', role: 'table', 'aria-label': group.name }, [
-		E('thead', { role: 'rowgroup' }, E('tr', { class: 'tr table-titles', role: 'row' },
-			headings.map(text => E('th', { class: 'th', scope: 'col', role: 'columnheader' }, [text])))),
-		E('tbody', { role: 'rowgroup' }, rows)
-	]);
-}
-
 function updated(peer) {
 	const age = Number.isFinite(peer.age) ? _('%d seconds ago').format(peer.age) : null;
 	if (!Number.isFinite(peer.updated_at))
@@ -190,7 +80,7 @@ function updated(peer) {
 	]);
 }
 
-function renderGroup(group, hints) {
+function renderGroup(group) {
 	const peer = group.peer;
 	let status = snapshotState(peer);
 	if (status === 'fresh' && !group.clients.length)
@@ -213,7 +103,6 @@ function renderGroup(group, hints) {
 				_('%d overlapping client observations hidden').format(group.overlaps)
 			]) : null
 		]),
-		group.clients.length ? clientTable(group, hints) : null,
 		peer.data?.truncated ? E('p', { class: 'cbi-section-descr' },
 			_('A node reached its station reporting limit.')) : null
 	]);
@@ -245,10 +134,10 @@ return baseclass.extend({
 		}
 
 		const groups = groupClients(result.data);
-		const visibleKeys = new Set(groups.flatMap(group => group.clients.map(client => client.key)));
-		for (const key of openClients)
-			if (!visibleKeys.has(key))
-				openClients.delete(key);
+		const clients = groups.flatMap(group => group.clients.map(client => ({
+			...client.associations[0], associations: client.associations, clientKey: client.key,
+			remote: true, node: group.name, otherNodes: client.otherNodes
+		})));
 
 		return E('div', { class: 'wrtmesh-overview' }, [
 			wrtmesh.stylesheet(),
@@ -257,8 +146,9 @@ return baseclass.extend({
 			E('h4', {}, _('Peer wireless clients')),
 			groups.some(group => group.clients.length) ? E('p', { class: 'cbi-section-descr' },
 				_('AP RX is from the client. AP TX is to the client. Rates are negotiated link rates.')) : null,
-			groups.length ? groups.map(group => renderGroup(group, result.hints)) :
-				E('p', { class: 'wrtmesh-client-state', 'data-state': 'no-peers' }, _('No peers configured.'))
+			groups.length ? E('div', { class: 'wrtmesh-client-statuses' }, groups.map(renderGroup)) :
+				E('p', { class: 'wrtmesh-client-state', 'data-state': 'no-peers' }, _('No peers configured.')),
+			clients.length ? wrtmesh.stationTable(clients, result.hints, { label: _('Peer wireless clients') }) : null
 		].flat());
 	}
 });

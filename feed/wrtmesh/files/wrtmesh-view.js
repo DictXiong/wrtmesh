@@ -343,10 +343,6 @@ return view.extend({
 		const headers = [_('Name'), _('IPv4 address'), _('Bridge MAC'), _('Peer status'), _('Roaming SSIDs')];
 		if (this.writable)
 			headers.push('');
-		const stationRows = wrtmesh.stations(data, true).map(s => [
-			wrtmesh.stationNetwork(s), cell(s.mac.toUpperCase()), wrtmesh.stationHost(s, this.hostHints),
-			wrtmesh.stationSignal(s.signal), wrtmesh.stationRates(s)
-		]);
 		const truncated = data?.local?.truncated || data?.peers?.some(peer => peer.data?.truncated);
 		return E('div', {}, [
 			this.localNetworks(),
@@ -355,8 +351,9 @@ return view.extend({
 			section(_('Mesh topology'), [wrtmesh.topology(data)]),
 			section(_('Associated Stations'), [
 				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached its station reporting limit.')) : null,
-				table([_('Network'), _('MAC address'), _('Host'), _('Signal'),
-					'%s / %s'.format(_('RX Rate'), _('TX Rate'))], stationRows, _('No associated stations reported.'))
+				E('p', { class: 'cbi-section-descr' },
+					_('AP RX is from the client. AP TX is to the client. Rates are negotiated link rates.')),
+				wrtmesh.stationTable(wrtmesh.stations(data, true), this.hostHints, { diagnostics: true })
 			])
 		]);
 	},

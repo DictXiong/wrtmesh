@@ -30,6 +30,58 @@ function stationIdentity(station, hints) {
 	return { name, ipv4, ipv6, label: name || ipv4 || ipv6 || '?' };
 }
 
+function distinct(items, value) {
+	return [...new Set(items.map(value).filter(value => value != null && value !== ''))];
+}
+
+function bandName(freq) {
+	if (freq >= 2400 && freq < 2500)
+		return _('2.4 GHz');
+	if (freq >= 4900 && freq < 5925)
+		return _('5 GHz');
+	if (freq >= 5925 && freq <= 7125)
+		return _('6 GHz');
+	if (freq >= 57000 && freq <= 71000)
+		return _('60 GHz');
+	return null;
+}
+
+function radioCell(observation, clientReport) {
+	const band = bandName(observation.freq);
+	const channel = Number.isFinite(observation.channel) ? _('Channel %d').format(observation.channel) : null;
+	const frequency = Number.isFinite(observation.freq) ? '%d %s'.format(observation.freq, _('MHz')) : null;
+	const radio = [band, channel, !band || !channel ? frequency : null].filter(Boolean).join(' · ') || '—';
+	const label = clientReport ? _('Client report') :
+		Number.isFinite(observation.id) ? _('Link %d').format(observation.id) : null;
+	return E('span', { class: 'wrtmesh-client-radio', title: frequency }, [
+		label ? E('span', { class: 'wrtmesh-link-label' }, [label]) : null,
+		E('span', { class: label ? 'wrtmesh-secondary' : null }, [radio])
+	]);
+}
+
+function interfaceCell(station, link, hasLinks) {
+	const items = [];
+	if (!link && station.iface)
+		items.push(E('span', {}, [station.iface]));
+	const bssid = link?.bssid || (!hasLinks || !station.links?.some(item => item.bssid === station.bssid) ? station.bssid : null);
+	if (bssid)
+		items.push(E('span', { class: 'wrtmesh-client-address', title: _('BSSID') }, [bssid.toUpperCase()]));
+	if (link?.mac)
+		items.push(E('small', { class: 'wrtmesh-secondary wrtmesh-client-address' }, [
+			_('Link MAC'), ' · ', link.mac.toUpperCase()
+		]));
+	if (!link && station.ap_mld)
+		items.push(E('small', { class: 'wrtmesh-secondary wrtmesh-client-address' }, [
+			_('AP MLD address'), ' · ', station.ap_mld.toUpperCase()
+		]));
+	return E('span', { class: 'wrtmesh-client-interface' }, items.length ? items : ['—']);
+}
+
+function clientCell(label, contents, kind, rowspan) {
+	return E('td', { class: 'td wrtmesh-client-' + kind + '-cell', role: 'cell',
+		'data-label': label, rowspan: rowspan > 1 ? rowspan : null }, [contents]);
+}
+
 function pathText(path) {
 	if (!path)
 		return _('Path unknown');
@@ -276,13 +328,14 @@ return baseclass.extend({
 	},
 
 	stationNetwork(station) {
+		const kind = station.remote ? _('Mesh peer') : _('This device');
 		return E('span', { class: 'ifacebadge wrtmesh-network', title: station.node }, [
 			E('img', { src: L.resource('icons/wifi.svg'), alt: '' }),
 			E('span', {}, [
 				station.ssid || station.iface || '—',
-				station.remote ? E('small', { class: 'wrtmesh-secondary' }, [
-					_('Mesh peer'), ' · ', station.node
-				]) : null
+				E('small', { class: 'wrtmesh-secondary' }, [
+					kind, station.node && station.node !== kind ? ' · ' + station.node : ''
+				])
 			])
 		]);
 	},
@@ -290,10 +343,68 @@ return baseclass.extend({
 	stationHint,
 	stationIdentity,
 
-	stationHost(station, hints) {
+	stationHost(station, hints, diagnostics) {
 		const identity = stationIdentity(station, hints);
 		const addresses = [identity.ipv4, identity.ipv6].filter(address => address && address !== identity.label);
-		return E('span', { class: 'wrtmesh-host', title: addresses.join(', ') || null }, [identity.label]);
+		const visible = diagnostics ? addresses : identity.name ? addresses.slice(0, 1) : [];
+		return E('span', { class: 'wrtmesh-host', title: addresses.join(', ') || null }, [
+			E('span', {}, [identity.label]),
+			...visible.map(address => E('small', { class: 'wrtmesh-secondary' }, [address]))
+		]);
+	},
+
+	// Only formats the caller's observations. Overview owns overlap selection;
+	// the Mesh page passes each local/peer record through without deduplication.
+	stationTable(stations, hints, options = {}) {
+		const diagnostics = options.diagnostics === true;
+		const headings = [_('Network'), _('MAC address'), _('Host')];
+		if (diagnostics)
+			headings.push(_('Band / Channel'), _('Wireless interface / BSSID'));
+		headings.push(_('Signal'), _('Negotiated rate (AP RX / TX)'));
+		const bodies = stations.map((station, index) => {
+			const observations = station.associations || [station];
+			const first = observations[0];
+			const links = diagnostics ? (first.links || []) : [];
+			const count = links.length + 1;
+			const ssids = distinct(observations, observation => observation.ssid);
+			const network = this.stationNetwork({ ...first, ...station, ssid: ssids.join(', ') });
+			const overlap = station.otherNodes?.length ? _('Also reported by %s').format(station.otherNodes.join(', ')) : null;
+			if (overlap)
+				network.title = [network.title, overlap].filter(Boolean).join(' · ');
+			const macs = distinct(observations, observation => observation.mac?.toUpperCase());
+			const mac = E('span', { class: 'wrtmesh-client-mac' }, [
+				...macs.map(address => E('span', { class: 'wrtmesh-client-address' }, [address])),
+				diagnostics && first.mld ? E('small', { class: 'wrtmesh-secondary' }, ['MLD']) : null
+			]);
+			const cells = [
+				clientCell(headings[0], network, 'network', count),
+				clientCell(headings[1], mac, 'mac', count),
+				clientCell(headings[2], this.stationHost(observations, hints, diagnostics), 'host', count)
+			];
+			if (diagnostics)
+				cells.push(clientCell(headings[3], radioCell(first, links.length > 0), 'radio'),
+					clientCell(headings[4], interfaceCell(first, null, links.length > 0), 'interface'));
+			cells.push(clientCell(_('Signal'), this.stationSignal(first.signal), 'signal'),
+				clientCell(headings[headings.length - 1], this.stationRates(first, true), 'rates'));
+			return E('tbody', { class: 'wrtmesh-client-entry', role: 'rowgroup',
+				'data-client': station.clientKey || JSON.stringify([station.node, first.mac, first.ssid, index]) }, [
+				E('tr', { class: 'tr wrtmesh-client-summary', role: 'row' }, cells),
+				...links.map(link => E('tr', { class: 'tr wrtmesh-client-link-row', role: 'row', 'data-link': link.id }, [
+					clientCell(headings[3], radioCell(link), 'radio'),
+					clientCell(headings[4], interfaceCell(first, link), 'interface'),
+					clientCell(_('Signal'), this.stationSignal(link.signal), 'signal'),
+					clientCell(headings[headings.length - 1], this.stationRates(link, true), 'rates')
+				]))
+			]);
+		});
+		return E('div', { class: 'wrtmesh-client-list' }, E('table', { class: 'table wrtmesh-client-table' + (diagnostics ? ' wrtmesh-client-diagnostics' : ''),
+			role: 'table', 'aria-label': options.label || _('Associated Stations') }, [
+			E('thead', { role: 'rowgroup' }, E('tr', { class: 'tr table-titles', role: 'row' },
+				headings.map(text => E('th', { class: 'th', scope: 'col', role: 'columnheader' }, [text])))),
+			...bodies,
+			!bodies.length ? E('tbody', {}, E('tr', { class: 'tr' }, E('td', { class: 'td', colspan: headings.length },
+				options.empty || _('No associated stations reported.')))) : null
+		]));
 	},
 
 	stationSignal(value) {

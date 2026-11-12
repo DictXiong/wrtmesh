@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.4.1-r1.apk
+apk add ./wrtmesh-6.4.2-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
@@ -65,15 +65,24 @@ map labels the bridge, local port and peer-side port. Forwarding data can point
 through a switch, and entries age out. The map shows unknown ports when the
 available evidence is incomplete. PPP dial-up next hops are omitted.
 
-The **Mesh** section in Overview shows the topology and a separate remote
-wireless client table grouped by access node. Client details include reported
-addresses and link identifiers when available. The client label prefers its
-name, then IPv4, then IPv6, and shows `?` only when all are unknown. RX and TX are negotiated link
-rates from the AP's perspective. A report with an explicit MLD identity can
-contain several links. During roaming, overlapping fresh records are shown
-once using the freshest observation when a reliable identity matches. Links
-from different APs are never combined. The native wireless table continues
+The **Mesh** section in Overview shows the topology and a compact remote
+client table ordered by access node. SSID/node, client MAC, host/IP, signal and
+AP RX/TX are visible without opening client details. The host label prefers its
+name, then IPv4, then IPv6, and shows `?` only when all are unknown; the MAC
+remains visible for identification. Node snapshot freshness and failure notices
+are separate from the table. During roaming, overlapping fresh records are
+shown once using the freshest observation when a reliable identity matches.
+Links from different APs are never combined. The native wireless table continues
 to show stations associated with the local AP.
+
+**Network → Mesh** adds permanent diagnostic rows for observed band/channel,
+interface/BSSID and explicit MLO links. Frequency is shown when needed to
+identify an otherwise unknown band or channel. Client report measurements and
+per-link measurements have separate rows; missing link measurements stay `—`,
+without copying rates from the client report. RX and TX are negotiated link
+rates from the AP's perspective, not measured throughput. Both tables share
+rendering and host/IP formatting, and use compact client cards when the page's
+available width is narrow. There are no per-client disclosure controls.
 
 The observer runs on a 30-second schedule. After 95 seconds without a new
 revision, the last snapshot stops contributing station and topology data.
@@ -296,7 +305,11 @@ node tests/test-luci-browser.cjs PATH_TO_UNPATCHED_LUCI_FEED
 
 Pass an unpacked APK root as a second argument to exercise its installed
 copies of the modules. Set `WRTMESH_PLAYWRIGHT` or `WRTMESH_CHROMIUM` to
-use a non-default module or browser executable.
+use a non-default module or browser executable. The harness uses LuCI's
+Bootstrap desktop/mobile styles by default. For GlassTheme acceptance, set
+`WRTMESH_THEME_ROOT` to the static asset directory containing
+`glass/css/cascade.css`. Set `WRTMESH_SCREENSHOTS` to an output directory to
+capture desktop/mobile Overview and Mesh views with synthetic client data.
 
 Build a standalone signed APK with the checksum-pinned SDK:
 

@@ -617,3 +617,18 @@ msgstr "无线设置不一致"
 
 msgid "Some local settings changed, but the previous settings could not be restored. Refresh and check the settings."
 msgstr "部分本机设置已改变，但未能恢复先前的设置。请刷新并核对当前设置。"
+
+msgid "Band / Channel"
+msgstr "频段／信道"
+
+msgid "Wireless interface / BSSID"
+msgstr "无线接口／BSSID"
+
+msgid "Channel %d"
+msgstr "信道 %d"
+
+msgid "Link MAC"
+msgstr "链路 MAC"
+
+msgid "Client report"
+msgstr "客户端观测"
