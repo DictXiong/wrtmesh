@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.4.2-r1.apk
+apk add ./wrtmesh-6.4.3-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
@@ -75,10 +75,10 @@ shown once using the freshest observation when a reliable identity matches.
 Links from different APs are never combined. The native wireless table continues
 to show stations associated with the local AP.
 
-**Network → Mesh** adds permanent diagnostic rows for observed band/channel,
+**Network → Mesh** adds compact diagnostic lines within each client row for observed band/channel,
 interface/BSSID and explicit MLO links. Frequency is shown when needed to
 identify an otherwise unknown band or channel. Client report measurements and
-per-link measurements have separate rows; missing link measurements stay `—`,
+per-link measurements have separate lines; missing link measurements stay `—`,
 without copying rates from the client report. RX and TX are negotiated link
 rates from the AP's perspective, not measured throughput. Both tables share
 rendering and host/IP formatting, and use compact client cards when the page's

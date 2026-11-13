@@ -264,13 +264,20 @@
 	margin: 0;
 }
 
-.wrtmesh-client-link-row .td {
-	border-top: 0;
-	padding-block: .35rem;
+.table.wrtmesh-client-table .tr .td.wrtmesh-client-observations-cell {
+	padding: 0;
 }
 
-.wrtmesh-client-link-row .wrtmesh-client-radio-cell {
-	border-inline-start: 2px solid color-mix(in srgb, currentColor 18%, transparent);
+.wrtmesh-observation {
+	display: grid;
+	grid-template-columns: minmax(0, 14fr) minmax(0, 19fr) minmax(0, 11fr) minmax(0, 13fr);
+	align-items: start;
+}
+
+.wrtmesh-observation > div {
+	min-width: 0;
+	padding: .5rem .55rem;
+	overflow-wrap: anywhere;
 }
 
 .wrtmesh-client-entry + .wrtmesh-client-entry {
@@ -305,8 +312,7 @@
 		border-radius: .4rem;
 	}
 
-	.wrtmesh-client-table .wrtmesh-client-summary,
-	.wrtmesh-client-table .wrtmesh-client-link-row {
+	.wrtmesh-client-table .wrtmesh-client-summary {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 		width: 100%;
@@ -330,16 +336,30 @@
 		opacity: .8;
 	}
 
-	.wrtmesh-client-table .wrtmesh-client-host-cell {
+	.wrtmesh-client-table .wrtmesh-client-host-cell,
+	.wrtmesh-client-table .wrtmesh-client-observations-cell {
 		grid-column: 1 / -1;
 	}
 
-	.wrtmesh-client-link-row {
-		border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+	.table.wrtmesh-client-table .wrtmesh-client-observations-cell::before {
+		display: none;
 	}
 
-	.wrtmesh-client-link-row .wrtmesh-client-radio-cell {
-		border-inline-start: 0;
+	.wrtmesh-observation {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	}
+
+	.wrtmesh-observation > div {
+		padding: .4rem .55rem;
+	}
+
+	.wrtmesh-observation > div::before {
+		content: attr(data-label);
+		display: block;
+		margin-bottom: .15rem;
+		font-size: .8em;
+		font-weight: 600;
+		opacity: .8;
 	}
 }
 

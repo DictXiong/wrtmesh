@@ -394,6 +394,8 @@ async function presentationAcceptance(browser) {
 		const table = page.locator('.wrtmesh-client-table');
 		assert.equal(await table.locator('thead th').count(), 7, 'Mesh exposes the seven diagnostic columns');
 		assert.equal(await table.locator('[data-client]').count(), 6, 'Mesh retains local and all remote observations');
+		assert.equal(await table.locator('tbody[data-client] > tr').count(), 6, 'each client has one outer table row');
+		assert.equal(await table.locator('[rowspan], table').count(), 0, 'client diagnostics do not leave partial outer rows or nested tables');
 		const links = table.locator('.wrtmesh-client-link-row');
 		assert.equal(await links.count(), 2, 'only the two explicitly observed MLO links receive link rows');
 		assert.match(await links.nth(0).textContent(), /5\s*GHz.*36/s, 'first link has its observed band/channel');
@@ -414,10 +416,10 @@ async function presentationAcceptance(browser) {
 			'parent interface and explicitly reported AP MLD remain visible');
 		if (await table.evaluate(node => getComputedStyle(node).display === 'table')) {
 			const aligned = await links.evaluateAll(rows => rows.every(row => {
-				const cells = [...row.cells].map(cell => cell.getBoundingClientRect());
+				const cells = [...row.children].map(cell => cell.getBoundingClientRect());
 				return cells.every(cell => Math.abs(cell.top - cells[0].top) < 1 && Math.abs(cell.bottom - cells[0].bottom) < 1);
 			}));
-			assert(aligned, 'MLO radio, interface, signal and rates align in each physical link row');
+			assert(aligned, 'MLO radio, interface, signal and rates align within each client cell');
 		}
 		assert.match(await table.textContent(), /ap-iot.*02:00:00:00:04:40/is, 'single link interface and BSSID stay visible');
 		assert.match(await table.textContent(), /fd42:1234:5678:9abc:1111:2222:3333:4444/,

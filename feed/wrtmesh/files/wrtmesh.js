@@ -77,9 +77,9 @@ function interfaceCell(station, link, hasLinks) {
 	return E('span', { class: 'wrtmesh-client-interface' }, items.length ? items : ['—']);
 }
 
-function clientCell(label, contents, kind, rowspan) {
+function clientCell(label, contents, kind) {
 	return E('td', { class: 'td wrtmesh-client-' + kind + '-cell', role: 'cell',
-		'data-label': label, rowspan: rowspan > 1 ? rowspan : null }, [contents]);
+		'data-label': label }, [contents]);
 }
 
 function pathText(path) {
@@ -263,7 +263,7 @@ return baseclass.extend({
 	nodeName,
 
 	stylesheet() {
-		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css') });
+		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css?v=6.4.3') });
 	},
 
 	topology(data) {
@@ -365,7 +365,6 @@ return baseclass.extend({
 			const observations = station.associations || [station];
 			const first = observations[0];
 			const links = diagnostics ? (first.links || []) : [];
-			const count = links.length + 1;
 			const ssids = distinct(observations, observation => observation.ssid);
 			const network = this.stationNetwork({ ...first, ...station, ssid: ssids.join(', ') });
 			const overlap = station.otherNodes?.length ? _('Also reported by %s').format(station.otherNodes.join(', ')) : null;
@@ -377,25 +376,36 @@ return baseclass.extend({
 				diagnostics && first.mld ? E('small', { class: 'wrtmesh-secondary' }, ['MLD']) : null
 			]);
 			const cells = [
-				clientCell(headings[0], network, 'network', count),
-				clientCell(headings[1], mac, 'mac', count),
-				clientCell(headings[2], this.stationHost(observations, hints, diagnostics), 'host', count)
+				clientCell(headings[0], network, 'network'),
+				clientCell(headings[1], mac, 'mac'),
+				clientCell(headings[2], this.stationHost(observations, hints, diagnostics), 'host')
 			];
-			if (diagnostics)
-				cells.push(clientCell(headings[3], radioCell(first, links.length > 0), 'radio'),
-					clientCell(headings[4], interfaceCell(first, null, links.length > 0), 'interface'));
-			cells.push(clientCell(_('Signal'), this.stationSignal(first.signal), 'signal'),
-				clientCell(headings[headings.length - 1], this.stationRates(first, true), 'rates'));
+
+			if (diagnostics) {
+				// One outer table row per client. The diagnostic grid shares row
+				// heights across all four columns, even when metadata wraps.
+				const report = (value, link) => E('div', {
+					class: 'wrtmesh-observation' + (link ? ' wrtmesh-client-link-row' : ''),
+					'data-observation': link ? 'link-' + value.id : 'client'
+				}, [
+					E('div', { class: 'wrtmesh-client-radio-cell', 'data-label': headings[3] },
+						radioCell(value, !link && links.length > 0)),
+					E('div', { class: 'wrtmesh-client-interface-cell', 'data-label': headings[4] },
+						interfaceCell(first, link ? value : null, !link && links.length > 0)),
+					E('div', { class: 'wrtmesh-client-signal-cell', 'data-label': _('Signal') },
+						this.stationSignal(value.signal)),
+					E('div', { class: 'wrtmesh-client-rates-cell', 'data-label': headings[6] },
+						this.stationRates(value, true))
+				]);
+				cells.push(E('td', { class: 'td wrtmesh-client-observations-cell', colspan: 4, role: 'cell' },
+					E('div', { class: 'wrtmesh-observations' }, [report(first, false), ...links.map(link => report(link, true))])));
+			} else {
+				cells.push(clientCell(_('Signal'), this.stationSignal(first.signal), 'signal'),
+					clientCell(headings[4], this.stationRates(first, true), 'rates'));
+			}
 			return E('tbody', { class: 'wrtmesh-client-entry', role: 'rowgroup',
-				'data-client': station.clientKey || JSON.stringify([station.node, first.mac, first.ssid, index]) }, [
-				E('tr', { class: 'tr wrtmesh-client-summary', role: 'row' }, cells),
-				...links.map(link => E('tr', { class: 'tr wrtmesh-client-link-row', role: 'row', 'data-link': link.id }, [
-					clientCell(headings[3], radioCell(link), 'radio'),
-					clientCell(headings[4], interfaceCell(first, link), 'interface'),
-					clientCell(_('Signal'), this.stationSignal(link.signal), 'signal'),
-					clientCell(headings[headings.length - 1], this.stationRates(link, true), 'rates')
-				]))
-			]);
+				'data-client': station.clientKey || JSON.stringify([station.node, first.mac, first.ssid, index]) },
+				E('tr', { class: 'tr wrtmesh-client-summary', role: 'row' }, cells));
 		});
 		return E('div', { class: 'wrtmesh-client-list' }, E('table', { class: 'table wrtmesh-client-table' + (diagnostics ? ' wrtmesh-client-diagnostics' : ''),
 			role: 'table', 'aria-label': options.label || _('Associated Stations') }, [
@@ -408,7 +418,7 @@ return baseclass.extend({
 	},
 
 	stationSignal(value) {
-		if (value == null)
+		if (!Number.isFinite(value) || value < -127 || value >= 0)
 			return E('span', {}, ['—']);
 		const quality = Math.max(0, Math.min(100, (value + 110) / 70 * 100));
 		const icon = quality === 0 ? '000-000' : quality < 25 ? '000-025' :
