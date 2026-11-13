@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.4.3-r1.apk
+apk add ./wrtmesh-6.4.4-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
@@ -75,14 +75,21 @@ shown once using the freshest observation when a reliable identity matches.
 Links from different APs are never combined. The native wireless table continues
 to show stations associated with the local AP.
 
-**Network → Mesh** adds compact diagnostic lines within each client row for observed band/channel,
-interface/BSSID and explicit MLO links. Frequency is shown when needed to
-identify an otherwise unknown band or channel. Client report measurements and
-per-link measurements have separate lines; missing link measurements stay `—`,
-without copying rates from the client report. RX and TX are negotiated link
-rates from the AP's perspective, not measured throughput. Both tables share
-rendering and host/IP formatting, and use compact client cards when the page's
-available width is narrow. There are no per-client disclosure controls.
+**Network → Mesh** uses the same compact client table and adds the reported
+wireless interface beside each SSID/node. Each client occupies one row; MLO
+links do not add subrows or repeat AP radio attributes. Missing or invalid RSSI
+shows `—`; valid negative RSSI and the client's own AP RX/TX measurements are
+preserved. Rates are negotiated link rates from the AP's perspective, not
+measured throughput. Both tables share rendering and host/IP formatting and
+adapt to narrow screens without per-client disclosure controls.
+
+**SSID roaming assistance** groups the existing peer states by SSID. The local
+radio summary appears once, with each peer's own summary beside its status.
+Band and channel come from current AP neighbor reports, deduplicated by BSSID;
+distinct BSSIDs on the same band/channel show a count. Expired or unavailable
+reports are marked, and unknown operating classes do not imply a guessed band.
+These reports do not identify MLO membership or remote interface/link IDs, so
+the summary does not infer them from report counts or client observations.
 
 The observer runs on a 30-second schedule. After 95 seconds without a new
 revision, the last snapshot stops contributing station and topology data.

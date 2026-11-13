@@ -392,40 +392,17 @@ async function presentationAcceptance(browser) {
 		await assertFits(page, 'Overview ' + width);
 		await page.evaluate(() => renderManagement());
 		const table = page.locator('.wrtmesh-client-table');
-		assert.equal(await table.locator('thead th').count(), 7, 'Mesh exposes the seven diagnostic columns');
+		assert.equal(await table.locator('thead th').count(), 5, 'Mesh shares the compact five client columns');
 		assert.equal(await table.locator('[data-client]').count(), 6, 'Mesh retains local and all remote observations');
 		assert.equal(await table.locator('tbody[data-client] > tr').count(), 6, 'each client has one outer table row');
-		assert.equal(await table.locator('[rowspan], table').count(), 0, 'client diagnostics do not leave partial outer rows or nested tables');
-		const links = table.locator('.wrtmesh-client-link-row');
-		assert.equal(await links.count(), 2, 'only the two explicitly observed MLO links receive link rows');
-		assert.match(await links.nth(0).textContent(), /5\s*GHz.*36/s, 'first link has its observed band/channel');
-		assert.match(await links.nth(1).textContent(), /6\s*GHz.*33/s, 'second link has its observed band/channel');
-		assert.equal(await links.nth(0).locator('.wrtmesh-client-radio').getAttribute('title'), '5180 MHz');
-		assert.equal(await links.nth(1).locator('.wrtmesh-client-radio').getAttribute('title'), '6115 MHz');
-		assert.match(await links.nth(0).textContent(), /02:00:00:00:04:11/i, 'observed link BSSID is visible');
-		assert.match(await links.nth(1).textContent(), /02:00:00:00:04:12/i, 'observed link BSSID is visible');
-		assert.deepEqual((await links.nth(0).locator('.wrtmesh-rates > span').allTextContents()).map(text => text.replace(/\s/g, ' ')), ['172.0 Mbit/s', '960.7 Mbit/s'],
-			'observed per-link AP RX and TX stay aligned with link 0');
-		assert.deepEqual(await links.nth(1).locator('.wrtmesh-rates > span').allTextContents(), ['—', '—'],
-			'missing per-link rates never borrow parent rates');
-		assert.equal(await links.nth(1).locator('.wrtmesh-client-signal-cell').textContent(), '—',
-			'missing per-link signal never borrows the parent signal');
-		assert.match(await links.nth(0).textContent(), /02:00:00:00:02:11/i, 'actual link MAC is visible');
-		assert.match(await links.nth(1).textContent(), /02:00:00:00:02:12/i, 'actual link MAC is visible');
-		assert.match(await table.textContent(), /ap-mld0.*AP MLD address.*02:00:00:00:04:10/is,
-			'parent interface and explicitly reported AP MLD remain visible');
-		if (await table.evaluate(node => getComputedStyle(node).display === 'table')) {
-			const aligned = await links.evaluateAll(rows => rows.every(row => {
-				const cells = [...row.children].map(cell => cell.getBoundingClientRect());
-				const bottom = row.getBoundingClientRect().bottom;
-				return cells.every(cell => Math.abs(cell.top - cells[0].top) < 1 && cell.bottom <= bottom + 1);
-			}));
-			assert(aligned, 'MLO radio, interface, signal and rates align within each client cell');
-		}
-		assert.match(await table.textContent(), /ap-iot.*02:00:00:00:04:40/is, 'single link interface and BSSID stay visible');
+		assert.equal(await table.locator('[rowspan], table, .wrtmesh-client-link-row, .wrtmesh-observation').count(), 0,
+			'clients have no link subrows, diagnostic grids or nested tables');
+		assert.match(await table.textContent(), /ap-mld0/, 'the reported MLO client interface stays visible');
+		assert.match(await table.textContent(), /ap-iot/, 'the reported single-link client interface stays visible');
+		assert.doesNotMatch(await table.textContent(), /02:00:00:00:04:|AP MLD address|Channel |MHz|Link [01]/,
+			'AP radio properties and link details do not repeat in client rows');
 		assert.match(await table.textContent(), /fd42:1234:5678:9abc:1111:2222:3333:4444/,
 			'long IPv6 remains inspectable');
-		assert.match(await table.textContent(), /5180\s*MHz/, 'frequency is visible when the observed channel is unknown');
 		assert.equal(await page.getByRole('img', { name: 'Mesh topology' }).count(), 1, 'Mesh topology remains available');
 		await assertFlatClients(page);
 		await assertFits(page, 'Mesh ' + width);
@@ -529,7 +506,7 @@ async function capturePresentation(browser) {
 		await assertFlatClients(page);
 		assert.match(await page.locator('.wrtmesh-overview').textContent(), /172\.0.*960\.7/s);
 		assert.equal(await page.locator('.wrtmesh-overview .wrtmesh-client-link-row').count(), 0,
-			'Overview stays compact while Mesh owns radio diagnostics');
+			'Overview clients remain compact');
 		await page.evaluate(() => pollOverview());
 		assert.equal(await page.evaluate(() => mock.calls), 1, 'Overview uses the common RPC cache');
 		await assertFlatClients(page);
@@ -655,7 +632,7 @@ async function capturePresentation(browser) {
 			assert.equal(await page.getByText('Roaming enabled', { exact: true }).count(), 0);
 			for (const label of ['Waiting for peer IP and MAC verification', 'Local assistance is disabled', 'Peer is unreachable', 'Peer neighbor reports expired', 'Peer IP and MAC do not match', 'Upgrade the peer to use automatic SSID roaming', 'Could not apply neighbor reports'])
 				assert.equal(await page.getByText(label, { exact: true }).count(), 1, label);
-			assert.equal(await page.locator('.wrtmesh-roaming-group').getByRole('heading', { name: 'Office (192.168.50.11)', exact: true }).count(), 1);
+			assert.equal(await page.locator('.wrtmesh-roaming-network').getByText('Office (192.168.50.11)', { exact: true }).count(), states.length);
 			const width = await page.locator('.wrtmesh-roaming-network').first().evaluate(node => node.getBoundingClientRect().width);
 			assert(width <= 390, 'SSID state card fits a mobile viewport');
 			await page.evaluate(() => {
@@ -704,7 +681,7 @@ async function capturePresentation(browser) {
 		}
 		await presentationAcceptance(browser);
 		await capturePresentation(browser);
-		console.log('Chromium passed flat Overview, Mesh link diagnostics, seven responsive widths, empty mobile tables, stock Wi-Fi, SSID selection, polling and failure states.');
+		console.log('Chromium passed compact Overview/Mesh client tables, seven responsive widths, empty mobile tables, stock Wi-Fi, SSID selection, polling and failure states.');
 	} finally {
 		await browser.close();
 	}

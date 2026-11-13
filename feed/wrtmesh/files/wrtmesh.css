@@ -192,13 +192,6 @@
 .wrtmesh-client-table .th:nth-child(3) { width: 22%; }
 .wrtmesh-client-table .th:nth-child(4) { width: 13%; }
 .wrtmesh-client-table .th:nth-child(5) { width: 20%; }
-.wrtmesh-client-diagnostics .th:nth-child(1) { width: 15%; }
-.wrtmesh-client-diagnostics .th:nth-child(2) { width: 14%; }
-.wrtmesh-client-diagnostics .th:nth-child(3) { width: 14%; }
-.wrtmesh-client-diagnostics .th:nth-child(4) { width: 14%; }
-.wrtmesh-client-diagnostics .th:nth-child(5) { width: 19%; }
-.wrtmesh-client-diagnostics .th:nth-child(6) { width: 11%; }
-.wrtmesh-client-diagnostics .th:nth-child(7) { width: 13%; }
 
 .wrtmesh-client-table .wrtmesh-network {
 	display: inline-flex;
@@ -227,17 +220,13 @@
 }
 
 .wrtmesh-client-mac,
-.wrtmesh-host,
-.wrtmesh-client-radio,
-.wrtmesh-client-interface {
+.wrtmesh-host {
 	display: block;
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
 
-.wrtmesh-client-mac > span,
-.wrtmesh-client-interface > span,
-.wrtmesh-link-label {
+.wrtmesh-client-mac > span {
 	display: block;
 }
 
@@ -264,32 +253,8 @@
 	margin: 0;
 }
 
-.table.wrtmesh-client-table .tr .td.wrtmesh-client-observations-cell {
-	padding: 0;
-}
-
-.wrtmesh-observation {
-	display: grid;
-	grid-template-columns: minmax(0, 14fr) minmax(0, 19fr) minmax(0, 11fr) minmax(0, 13fr);
-	align-items: start;
-}
-
-.wrtmesh-observation > div {
-	min-width: 0;
-	padding: .5rem .55rem;
-	overflow-wrap: anywhere;
-}
-
 .wrtmesh-client-entry + .wrtmesh-client-entry {
 	border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-}
-
-@media (max-width: 68rem) {
-	.wrtmesh-client-diagnostics .td,
-	.wrtmesh-client-diagnostics .th {
-		padding-inline: .35rem;
-		font-size: .9em;
-	}
 }
 
 @container wrtmesh-clients (max-width: 52rem) {
@@ -336,30 +301,8 @@
 		opacity: .8;
 	}
 
-	.wrtmesh-client-table .wrtmesh-client-host-cell,
-	.wrtmesh-client-table .wrtmesh-client-observations-cell {
+	.wrtmesh-client-table .wrtmesh-client-host-cell {
 		grid-column: 1 / -1;
-	}
-
-	.table.wrtmesh-client-table .wrtmesh-client-observations-cell::before {
-		display: none;
-	}
-
-	.wrtmesh-observation {
-		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-	}
-
-	.wrtmesh-observation > div {
-		padding: .4rem .55rem;
-	}
-
-	.wrtmesh-observation > div::before {
-		content: attr(data-label);
-		display: block;
-		margin-bottom: .15rem;
-		font-size: .8em;
-		font-weight: 600;
-		opacity: .8;
 	}
 }
 
@@ -427,4 +370,13 @@
 .wrtmesh-roaming-state[data-state="error"],
 .wrtmesh-roaming-state[data-state="mismatch"] {
 	color: var(--error-color-high, #b91c1c);
+}
+
+.wrtmesh-ssid-local {
+	margin-block: .3rem .5rem;
+	overflow-wrap: anywhere;
+}
+
+.wrtmesh-ssid-radios {
+	font-size: .9em;
 }

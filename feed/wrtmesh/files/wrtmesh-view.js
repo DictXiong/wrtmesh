@@ -222,25 +222,38 @@ return view.extend({
 			peer_ambiguous: _('Peer SSID settings are ambiguous'), bssid_collision: _('Peer wireless identity conflicts'),
 			awaiting_apply: _('Waiting for AP application'), apply_failed: _('Could not apply neighbor reports')
 		};
-		const groups = (data?.peers || []).map(peer => {
+		const networks = new Map();
+		for (const peer of data?.peers || []) {
 			const entries = Array.isArray(peer.roaming) ? peer.roaming :
 				(peer.ssids || []).map(ssid => ({ ssid, state: 'pending' }));
-			if (!entries.length)
-				return null;
-			return E('section', { class: 'wrtmesh-roaming-group', 'data-peer': peer.bridge_mac }, [
-				E('h4', {}, [wrtmesh.nodeName(peer)]),
-				E('ul', { class: 'wrtmesh-roaming-networks' }, entries.map(entry => {
+			for (const entry of entries) {
+				if (!networks.has(entry.ssid))
+					networks.set(entry.ssid, new Map());
+				networks.get(entry.ssid).set(peer.bridge_mac, { peer, entry });
+			}
+		}
+		const groups = Array.from(networks, ([ssid, peers]) =>
+			E('section', { class: 'wrtmesh-roaming-group', 'data-ssid': ssid }, [
+				E('h4', {}, [ssid]),
+				E('p', { class: 'wrtmesh-ssid-local' }, [
+					E('strong', {}, [_('This device')]), ' · ', wrtmesh.ssidRadios(data?.local, ssid, data?.local_age)
+				]),
+				E('ul', { class: 'wrtmesh-roaming-networks' }, Array.from(peers.values(), ({ peer, entry }) => {
 					const state = entry.state || 'pending';
 					const label = state === 'active' ? states.active : reasons[entry.reason] || states[state] || states.pending;
 					const age = Number.isFinite(entry.age) ? _('%d seconds ago').format(entry.age) : _('Update time unavailable');
-					return E('li', { class: 'wrtmesh-roaming-network', 'data-ssid': entry.ssid }, [
-						E('strong', {}, [entry.ssid]),
+					const expired = state === 'stale' || ['peer_stale', 'peer_reports_stale'].includes(entry.reason);
+					const verified = peer.identity === 'verified' && !['identity_pending', 'identity_mismatch'].includes(entry.reason);
+					const snapshot = peer.online && peer.status === 'fresh' && verified && entry.reason !== 'peer_reports_invalid' ? peer.data : null;
+					return E('li', { class: 'wrtmesh-roaming-network', 'data-peer': peer.bridge_mac, 'data-ssid': ssid }, [
+						E('strong', {}, [wrtmesh.nodeName(peer)]),
 						E('span', { class: 'wrtmesh-roaming-state', 'data-state': state }, [label]),
+						expired ? E('span', { class: 'wrtmesh-ssid-radios', 'data-state': 'stale' }, [_('Radio information expired')]) :
+							wrtmesh.ssidRadios(snapshot, ssid, peer.age),
 						E('span', { class: 'wrtmesh-secondary' }, [Number.isFinite(entry.age) ? _('Updated %s').format(age) : age])
 					]);
 				}))
-			]);
-		}).filter(Boolean);
+			]));
 		return section(_('SSID roaming assistance'), [
 			...groups,
 			!groups.length ? E('p', {}, [_('No SSIDs selected for roaming assistance.')]) : null
@@ -353,7 +366,7 @@ return view.extend({
 				truncated ? E('p', { class: 'cbi-section-descr' }, _('A node reached its station reporting limit.')) : null,
 				E('p', { class: 'cbi-section-descr' },
 					_('AP RX is from the client. AP TX is to the client. Rates are negotiated link rates.')),
-				wrtmesh.stationTable(wrtmesh.stations(data, true), this.hostHints, { diagnostics: true })
+				wrtmesh.stationTable(wrtmesh.stations(data, true), this.hostHints, { interfaces: true })
 			])
 		]);
 	},
