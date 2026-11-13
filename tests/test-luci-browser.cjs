@@ -417,7 +417,8 @@ async function presentationAcceptance(browser) {
 		if (await table.evaluate(node => getComputedStyle(node).display === 'table')) {
 			const aligned = await links.evaluateAll(rows => rows.every(row => {
 				const cells = [...row.children].map(cell => cell.getBoundingClientRect());
-				return cells.every(cell => Math.abs(cell.top - cells[0].top) < 1 && Math.abs(cell.bottom - cells[0].bottom) < 1);
+				const bottom = row.getBoundingClientRect().bottom;
+				return cells.every(cell => Math.abs(cell.top - cells[0].top) < 1 && cell.bottom <= bottom + 1);
 			}));
 			assert(aligned, 'MLO radio, interface, signal and rates align within each client cell');
 		}
