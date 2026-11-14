@@ -334,6 +334,9 @@ return view.extend({
 				throw new Error(_('The AP settings changed or support could not be confirmed. Recheck before saving.'));
 			if (latest.configuration?.rrm_neighbor_report !== ap.configuration?.rrm_neighbor_report || latest.configuration?.nr === true)
 				throw new Error(_('The AP settings changed or support could not be confirmed. Recheck before saving.'));
+			const finalChanges = pendingChanges(await getPendingChanges());
+			if (finalChanges.wireless?.length || localWirelessEdits())
+				throw new Error(_('Apply or discard existing wireless changes first.'));
 			// Standard UCI staging only: never commit, apply or flush other local edits.
 			let saved;
 			try {

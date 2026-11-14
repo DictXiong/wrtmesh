@@ -236,7 +236,7 @@ return baseclass.extend({
 	nodeName,
 
 	stylesheet() {
-		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css') + '?v=6.5.0' });
+		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css') + '?v=6.5.1' });
 	},
 
 	topology(data) {

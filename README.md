@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.5.0-r1.apk
+apk add ./wrtmesh-6.5.1-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
