@@ -141,7 +141,7 @@ function diagram(local, peers, gateways, links, bus) {
 	const picture = svgElement('svg', {
 		viewBox: [left, 0, width, height].join(' '), width, height,
 		class: 'wrtmesh-map', role: 'img', 'aria-label': _('Mesh topology'),
-		style: 'min-width:' + Math.min(400, width) + 'px'
+		style: 'min-width:' + width + 'px'
 	});
 	function line(x1, y1, x2, y2, title, known, shared) {
 		const segment = svgElement('line', {
@@ -236,7 +236,7 @@ return baseclass.extend({
 	nodeName,
 
 	stylesheet() {
-		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css?v=6.4.4') });
+		return E('link', { rel: 'stylesheet', href: L.resource('wrtmesh.css') + '?v=6.4.5' });
 	},
 
 	topology(data) {

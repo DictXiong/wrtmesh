@@ -56,6 +56,12 @@ const scripts = {
 	management: source('wrtmesh-view.js', 'view/network/wrtmesh.js')
 };
 const stylesheet = source('wrtmesh.css');
+// Use LuCI's resource URL builder verbatim; concatenation hides rejected parts.
+const luciCore = fs.readFileSync(path.join(luci, 'modules/luci-base/htdocs/luci-static/resources/luci.js'), 'utf8');
+const pathMethod = luciCore.match(/\bpath\(prefix\s*=\s*''\s*,\s*parts\)\s*\{[\s\S]*?\},/);
+const resourceMethod = luciCore.match(/\bresource\(\)\s*\{[\s\S]*?\}/);
+assert(pathMethod && resourceMethod, 'provide the real LuCI path/resource methods');
+scripts.resourceMethods = pathMethod[0].slice(0, -1) + ',' + resourceMethod[0];
 assert(!scripts.wifi.includes('wrtmesh'), 'provide the unpatched LuCI source');
 if (process.env.WRTMESH_LEGACY_WIFI)
 	scripts.legacyWifi = fs.readFileSync(process.env.WRTMESH_LEGACY_WIFI, 'utf8');
@@ -124,14 +130,14 @@ async function harness(browser, { installed = true, data, writable = false, read
 				themeHrefs.map(href => '<link rel="stylesheet" href="' + href + '">').join('') +
 				'</head><body><div id="bg-wrap"></div><div id="content-wrap"><div id="content">' +
 				'<main id="maincontent"></main></div></div></body></html>' });
-		if (url.pathname.endsWith('/wrtmesh.css'))
+		if (url.pathname === '/luci-static/resources/wrtmesh.css')
 			return route.fulfill({ contentType: 'text/css', body: stylesheet });
 		if (url.pathname === '/favicon.ico')
 			return route.fulfill({ status: 204, body: '' });
 		if (url.pathname.startsWith('/luci-static/')) {
 			for (const staticRoot of [themeRoot, bootstrapRoot, path.join(luci, 'modules/luci-base/htdocs/luci-static')].filter(Boolean)) {
 				const file = path.resolve(staticRoot, url.pathname.slice('/luci-static/'.length));
-				if (file.startsWith(path.resolve(staticRoot) + path.sep) && fs.existsSync(file))
+				if (file.startsWith(path.resolve(staticRoot) + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile())
 					return route.fulfill({ path: file });
 			}
 		}
@@ -263,7 +269,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 		const modules = {};
 		window.L = {
 			bind: (fn, self, ...args) => fn.bind(self, ...args),
-			resource: resource => '/luci-static/resources/' + resource,
+			...new Function('env', 'return ({' + scripts.resourceMethods + '});')({ resource: '/luci-static/resources' }),
 			require: async name => {
 				if (!Object.hasOwn(modules, name))
 					throw new Error('Unexpected module ' + name);
@@ -360,6 +366,21 @@ async function assertFits(page, label) {
 }
 
 async function assertFlatClients(page) {
+	for (const link of await page.locator('main link[rel="stylesheet"]').all()) {
+		const style = await link.evaluate(node => ({ href: node.href,
+			rules: node.sheet?.cssRules.length || 0 }));
+		assert.equal(new URL(style.href).pathname, '/luci-static/resources/wrtmesh.css',
+			'the component requests its CSS file rather than a resource directory');
+		assert(style.rules > 0, 'component CSS loaded through its own link');
+	}
+	for (const node of await page.locator('.wrtmesh-map .wrtmesh-node').all()) {
+		assert.notEqual(await node.evaluate(element => getComputedStyle(element).stroke), 'none',
+			'topology styles apply to the rendered SVG');
+	}
+	for (const label of await page.locator('.wrtmesh-map .wrtmesh-node-label').all()) {
+		assert(await label.evaluate(node => node.ownerSVGElement.getScreenCTM().a * parseFloat(getComputedStyle(node).fontSize) >= 12),
+			'narrow topology retains readable text in its existing scroll container');
+	}
 	assert.equal(await page.locator('.wrtmesh-client-table details, .wrtmesh-client-table summary').count(), 0,
 		'client identity and diagnostics are visible without per-client disclosure');
 	assert.equal(await page.locator('details.wrtmesh-client-details').count(), 0, 'old client disclosure triangles are gone');
