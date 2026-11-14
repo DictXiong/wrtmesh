@@ -4,6 +4,7 @@
 import * as ubus from 'ubus';
 import * as fs from 'fs';
 import * as mesh from '/usr/lib/wrtmesh/mesh.uc';
+import * as kvr from '/usr/lib/wrtmesh/readiness.uc';
 
 function mutate(handler, args) {
 	let lock = fs.open('/var/lock/wrtmesh-config.lock', 'ae', 0o600);
@@ -82,6 +83,26 @@ function configuration() {
 			ttl: { min: 180, max: 1800, default: 180 }
 		}
 	};
+}
+
+// Independent read-only path: do not initialize peer inventory or mutate UCI.
+function readiness() {
+	try {
+		let connection = ubus.connect(null, 1);
+		let bus = { call: (object, method, args) => connection?.call(object, method, args),
+			list: object => connection?.list(object) };
+		let link = fs.lstat('/etc/config/wireless');
+		let target = fs.stat('/etc/config/wireless');
+		let ownership = 'unknown';
+		if (target?.type == 'file' && type(target.mode) == 'int') {
+			if (!(target.mode & 0o222)) ownership = 'readonly';
+			else if (link?.type == 'file') ownership = 'ordinary';
+		}
+		return kvr.collect(mesh.cursor(), bus, mesh.read_json(mesh.state + '/local.json', mesh.response_limit),
+			mesh.uptime(), ownership);
+	} catch (e) {
+		return { version: 1, error: 'configuration_unavailable', aps: [] };
+	}
 }
 
 function finish_commit(config, name) {
@@ -464,6 +485,7 @@ return {
 	wrtmesh: {
 		status: { call: status },
 		configuration: { call: configuration },
+		readiness: { call: readiness },
 		network_save: { args: { section: '', enabled: false, interval: 30, ttl: 180 }, call: req => mutate(network_save, req.args) },
 		peer_save: { args: { address: '', bridge_mac: '', name: '', ssids: [] }, call: req => mutate(peer_save, req.args) },
 		profile_save: {

@@ -88,12 +88,13 @@ config roaming 'main'
             .replace('/tmp/dhcp.leases', str(stage / 'dhcp.leases'))
         )
         (stage / 'dhcp.leases').write_text(f"0 {link2['address']} 192.168.1.43 example-client *\n")
-        for name in ('wrtmesh.uc', 'wrtmesh.cgi'):
+        for name in ('wrtmesh.uc', 'wrtmesh.cgi', 'readiness.uc'):
             shutil.copyfile(source / name, stage / name)
         for name in ('mesh-sample.uc', 'wrtmesh.uc', 'wrtmesh.cgi'):
             path = stage / name
             path.write_text(path.read_text()
                             .replace('/usr/lib/wrtmesh/mesh.uc', str(stage / 'mesh.uc'))
+                            .replace('/usr/lib/wrtmesh/readiness.uc', str(stage / 'readiness.uc'))
                             .replace("from 'ubus'", f"from '{stage}/fixture-ubus.uc'")
                             .replace("from 'rtnl'", f"from '{stage}/fixture-rtnl.uc'")
                             .replace('/etc/config/', str(config) + '/')

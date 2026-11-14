@@ -5,6 +5,7 @@
 'require ui';
 'require wrtmesh';
 'require network';
+'require uci';
 
 const discover = rpc.declare({ object: 'wrtmesh', method: 'discover' });
 const scan = rpc.declare({ object: 'wrtmesh', method: 'scan' });
@@ -17,6 +18,75 @@ const getConfiguration = rpc.declare({ object: 'wrtmesh', method: 'configuration
 const saveNetwork = rpc.declare({
 	object: 'wrtmesh', method: 'network_save', params: ['section', 'enabled', 'interval', 'ttl'], raise: true
 });
+const getReadiness = rpc.declare({ object: 'wrtmesh', method: 'readiness', reject: true });
+const getPendingChanges = rpc.declare({ object: 'uci', method: 'changes', reject: true });
+const wirelessAccess = rpc.declare({
+	object: 'session', method: 'access', params: ['scope', 'object', 'function'], reject: true
+});
+
+async function loadReadiness() {
+	try {
+		const data = await getReadiness();
+		if (data?.version === 1 && !data.error && Array.isArray(data.aps))
+			return { data };
+	} catch (e) { /* Older or restricted installations keep the rest of Mesh. */ }
+	return { error: 'unavailable' };
+}
+
+async function canConfigureWireless() {
+	try {
+		const permissions = await Promise.all(['read', 'write'].map(mode => wirelessAccess('uci', 'wireless', mode)));
+		return permissions.some(value => value?.access === false) ? false :
+			permissions.every(value => value?.access === true) ? true : null;
+	} catch (e) {
+		return null;
+	}
+}
+
+function canStageWireless() {
+	return typeof uci.callSet === 'function' && typeof ui.changes?.displayChanges === 'function' &&
+		typeof ui.changes?.renderChangeIndicator === 'function';
+}
+
+function pendingChanges(response) {
+	if (!response || typeof response.changes !== 'object' || response.changes === null || Array.isArray(response.changes))
+		throw new Error(_('Could not check pending changes. Use the wireless settings page.'));
+	if (Object.values(response.changes).some(records => !Array.isArray(records)))
+		throw new Error(_('Could not check pending changes. Use the wireless settings page.'));
+	return response.changes;
+}
+
+function localWirelessEdits() {
+	return ['creates', 'changes', 'deletes', 'reorder'].some(kind => {
+		const value = uci.state?.[kind]?.wireless;
+		return value && (typeof value !== 'object' || Object.keys(value).length > 0);
+	});
+}
+
+const configured = value => value === true ? _('Enabled') : value === false ? _('Disabled') : _('Default');
+const active = value => value === 'enabled' ? _('Enabled') : value === 'disabled' ? _('Disabled') : _('Cannot confirm');
+const capability = value => value === 'supported' ? _('Available') : value === 'unsupported' ? _('Unsupported') : _('Cannot confirm');
+const interfacesOf = ap => Array.isArray(ap.interfaces) ? ap.interfaces : [];
+const allNR = (ap, field, value) => interfacesOf(ap).length > 0 && interfacesOf(ap).every(iface => iface[field]?.nr_api === value);
+
+function readinessState(ap, worker) {
+	const interfaces = interfacesOf(ap);
+	if (interfaces.some(iface => iface.capabilities?.nr_api === 'unsupported'))
+		return { state: 'unsupported', text: _('Unsupported'), reason: _('Neighbor report API unavailable') };
+	if (ap.disabled || interfaces.some(iface => iface.status === 'disabled'))
+		return { state: 'off', text: _('Not enabled'), reason: _('AP unavailable') };
+	if (worker?.enabled === false)
+		return { state: 'off', text: _('Not enabled'), reason: _('wrtmesh worker is disabled') };
+	if (worker?.enabled === true && worker.supported !== true)
+		return { state: 'unknown', text: _('Cannot confirm'), reason: _('wrtmesh worker readiness is not confirmed') };
+	if (interfaces.some(iface => iface.runtime?.nr?.state === 'disabled'))
+		return { state: 'off', text: _('Not enabled'), reason: _('Neighbor reports are not active') };
+	if (worker?.enabled && worker.supported === true && allNR(ap, 'capabilities', 'supported') &&
+		interfaces.every(iface => iface.runtime?.nr?.state === 'enabled'))
+		return { state: 'ready', text: _('Ready') };
+	return { state: 'unknown', text: _('Cannot confirm'), reason: _('Current neighbor report operation is not confirmed') };
+}
+
 const access = rpc.declare({
 	object: 'session', method: 'access', params: ['scope', 'object', 'function'], expect: { access: false }
 });
@@ -98,7 +168,8 @@ return view.extend({
 			wrtmesh.loadStatus(),
 			L.resolveDefault(access('ubus', 'wrtmesh', 'peer_save'), false),
 			loadConfiguration(),
-			L.resolveDefault(access('ubus', 'wrtmesh', 'network_save'), false)
+			L.resolveDefault(access('ubus', 'wrtmesh', 'network_save'), false),
+			loadReadiness(), canConfigureWireless()
 		]);
 		const data = values[0];
 		const hasClients = data?.local?.stations?.length || data?.peers?.some(peer => peer.data?.stations?.length);
@@ -114,9 +185,11 @@ return view.extend({
 		return ui.createHandlerFn(this, () => fn().catch(async error => {
 			if (error.saved) {
 				ui.hideModal();
-				await this.refresh(true);
+				this.notify(error);
+				try { await this.refresh(true); } catch (refreshError) { this.notify(refreshError); }
+			} else {
+				this.notify(error);
 			}
-			this.notify(error);
 		}));
 	},
 
@@ -126,6 +199,10 @@ return view.extend({
 			const configuration = await loadConfiguration();
 			this.configuration = configuration.data;
 			this.configurationError = configuration.error;
+			const readiness = await loadReadiness();
+			this.readiness = readiness.data;
+			this.readinessChecked = Date.now();
+			this.wirelessWritable = await canConfigureWireless();
 		}
 		this.data = data;
 		this.content.replaceChildren(this.sections(data));
@@ -151,7 +228,8 @@ return view.extend({
 		});
 		ui.showModal(_('Local wireless network'), [
 			E('p', {}, [network.ssid || _('SSID unavailable')]),
-			field(_('Enable roaming assistance for this local SSID'), enabled),
+			E('p', { class: 'cbi-section-descr' }, _('This controls wrtmesh collection and neighbor synchronization, not wireless k/v/r options.')),
+			field(_('Enable the wrtmesh worker for this SSID'), enabled),
 			E('details', { class: 'wrtmesh-network-advanced' }, [
 				E('summary', {}, [_('Advanced settings')]),
 				field(_('Check interval (seconds)'), interval),
@@ -174,30 +252,179 @@ return view.extend({
 		]);
 	},
 
-	localNetworks() {
-		if (!this.configuration)
-			return section(_('Local wireless networks'), [
-				E('p', { class: 'cbi-section-descr', 'data-state': this.configurationError },
-					this.configurationError === 'forbidden' ? _('Permission to view local roaming settings was denied.') :
-						_('Local roaming settings are unavailable.'))
+	async recheckReadiness() {
+		const readiness = await loadReadiness();
+		this.readiness = readiness.data;
+		this.readinessChecked = Date.now();
+		this.wirelessWritable = await canConfigureWireless();
+		const tracked = new Set([...(this.pendingNeighbors || []), ...(this.uncertainNeighbors || [])]);
+		if (tracked.size) {
+			this.pendingNeighbors ||= new Set();
+			this.uncertainNeighbors ||= new Set();
+			try {
+				const changes = pendingChanges(await getPendingChanges());
+				for (const sid of tracked) {
+					if (changes.wireless?.some(record => record[0] === 'set' && record[1] === sid && record[2] === 'rrm_neighbor_report' && record[3] === '1'))
+						this.pendingNeighbors.add(sid);
+					else
+						this.pendingNeighbors.delete(sid);
+					this.uncertainNeighbors.delete(sid);
+				}
+			} catch (e) {
+				for (const sid of tracked) {
+					this.pendingNeighbors.delete(sid);
+					this.uncertainNeighbors.add(sid);
+				}
+			}
+		}
+		this.content.replaceChildren(this.sections(this.data));
+	},
+
+	workerFor(ap) {
+		if (typeof ap.section !== 'string' || !ap.section) return null;
+		const group = this.networks().find(network => network.section === ap.section ||
+			network.sections?.includes(ap.section) || network.members?.some(member => member.section === ap.section));
+		if (!group) return null;
+		const member = group.members?.find(item => item.section === ap.section);
+		const profiles = group.profiles?.filter(profile => profile.section === ap.section);
+		return { ...group, editor: group,
+			enabled: profiles ? profiles.length > 0 && profiles.every(profile => profile.enabled) :
+				group.members?.length > 1 ? undefined : group.enabled,
+			supported: group.reason === 'local_ambiguous' ? false : !profiles?.length ? undefined :
+				(member?.supported ?? group.supported) === true && profiles.every(profile => profile.supported === true)
+		};
+	},
+
+	optionalCapabilities(ap) {
+		const interfaces = interfacesOf(ap);
+		const option = (label, configValue, field, method) => E('li', {}, [
+			E('strong', {}, [label]),
+			E('span', { class: 'wrtmesh-secondary' }, [_('Configured: %s').format(configured(configValue))]),
+			...interfaces.map(iface => E('span', { class: 'wrtmesh-secondary' }, [
+				iface.iface, ' · ', _('Active: %s').format(active(iface.runtime?.[field]?.state)),
+				method ? ' · ' + _('API: %s').format(capability(iface.capabilities?.[method])) : ''
+			]))
+		]);
+		return E('details', { class: 'wrtmesh-network-advanced' }, [
+			E('summary', {}, [_('Optional capabilities')]),
+			E('ul', { class: 'wrtmesh-readiness-options' }, [
+				option(_('Beacon measurement (optional)'), ap.configuration?.rrm_beacon_report, 'beacon', 'beacon_api'),
+				option(_('BSS Transition (optional)'), ap.configuration?.bss_transition, 'btm', 'btm_api'),
+				option(_('Fast Transition (optional)'), ap.configuration?.ieee80211r, 'ft')
+			]),
+			E('p', { class: 'cbi-section-descr' }, _('wrtmesh does not send BTM steering requests. Configure FT and its mobility domain in wireless settings.')),
+			E('a', { href: L.url('admin/network/wireless') }, [_('Wireless settings')])
+		]);
+	},
+
+	async neighborReportEditor(ap) {
+		const title = [ap.ssid, ...interfacesOf(ap).map(iface => iface.iface)].filter(Boolean).join(' · ');
+		const save = async () => {
+			const permission = await canConfigureWireless();
+			if (permission === false)
+				throw new Error(_('Permission to change wireless settings was denied.'));
+			if (permission !== true || !canStageWireless())
+				throw new Error(_('Wireless configuration access could not be confirmed. Use wireless settings.'));
+			const changes = pendingChanges(await getPendingChanges());
+			if (changes.wireless?.length || localWirelessEdits())
+				throw new Error(_('Apply or discard existing wireless changes first.'));
+			const latest = (await loadReadiness()).data?.aps.find(item => item.section === ap.section);
+			if (!latest || latest.ssid !== ap.ssid || JSON.stringify(latest.devices) !== JSON.stringify(ap.devices) ||
+				latest.ownership === 'readonly' || !allNR(latest, 'capabilities', 'supported'))
+				throw new Error(_('The AP settings changed or support could not be confirmed. Recheck before saving.'));
+			if (latest.configuration?.rrm_neighbor_report !== ap.configuration?.rrm_neighbor_report || latest.configuration?.nr === true)
+				throw new Error(_('The AP settings changed or support could not be confirmed. Recheck before saving.'));
+			// Standard UCI staging only: never commit, apply or flush other local edits.
+			let saved;
+			try {
+				await uci.callSet('wireless', ap.section, { rrm_neighbor_report: '1' });
+				saved = pendingChanges(await getPendingChanges());
+				if (!saved.wireless?.some(record => record[0] === 'set' && record[1] === ap.section && record[2] === 'rrm_neighbor_report' && record[3] === '1'))
+					throw new Error('pending result unavailable');
+			} catch (e) {
+				this.uncertainNeighbors ||= new Set();
+				this.uncertainNeighbors.add(ap.section);
+				this.pendingNeighbors?.delete(ap.section);
+				const error = new Error(_('The setting may be staged, but its pending state could not be confirmed. Review wireless settings.'));
+				error.saved = true;
+				throw error;
+			}
+			this.pendingNeighbors ||= new Set();
+			this.pendingNeighbors.add(ap.section);
+			this.uncertainNeighbors?.delete(ap.section);
+			ui.changes.renderChangeIndicator(saved);
+			ui.showModal(_('Neighbor report saved'), [
+				E('p', {}, [title]),
+				E('p', {}, _('Saved as pending. Wireless has not been reloaded. Applying may briefly disconnect clients.')),
+				E('p', { class: 'cbi-section-descr' }, _('The standard changes dialog includes all pending changes in this session.')),
+				E('div', { class: 'right wrtmesh-actions' }, [
+					E('button', { class: 'btn', click: ui.hideModal }, [_('Close')]),
+					E('button', { class: 'btn cbi-button-positive', click: () => ui.changes.displayChanges() }, [_('Review pending changes')])
+				])
 			]);
-		const rows = this.networks().map(network => {
-			const row = [
-				cell(network.ssid || _('SSID unavailable')),
-				cell(network.enabled ? _('Enabled') : _('Disabled')),
-				cell(!network.available ? _('AP unavailable') :
-					network.supported === false ? _('Radio information unavailable') : network.mlo ? _('MLO, up to %d links').format(network.max_links) : _('Single link'))
-			];
-			if (this.networkWritable)
-				row.push(E('button', { class: 'btn', click: () => this.networkEditor(network) }, _('Settings')));
-			return row;
+			this.content.replaceChildren(this.sections(this.data));
+		};
+		ui.showModal(_('Enable neighbor reports'), [
+			E('p', {}, [title]),
+			E('p', { class: 'wrtmesh-config-preview' }, ['wireless.', ap.section, '.rrm_neighbor_report: ',
+				configured(ap.configuration?.rrm_neighbor_report), ' → 1']),
+			E('p', {}, _('Only neighbor reporting for this AP will be saved. Beacon, BTM, FT and other wireless settings stay as configured.')),
+			E('p', { class: 'cbi-section-descr' }, _('Save creates a pending change. Apply it separately in the standard LuCI changes dialog; applying may briefly disconnect clients.')),
+			E('p', { class: 'cbi-section-descr' }, _('If wireless is managed declaratively, adjust its configuration source.')),
+			E('div', { class: 'right wrtmesh-actions' }, [
+				E('button', { class: 'btn', click: ui.hideModal }, [_('Cancel')]),
+				E('button', { class: 'btn cbi-button-positive', click: this.action(save) }, [_('Save pending change')])
+			])
+		]);
+	},
+
+	localNetworks() {
+		const aps = this.readiness?.aps || this.networks().flatMap(network => network.members?.length ? network.members : [network]);
+		const cards = aps.map(ap => {
+			const worker = this.workerFor(ap);
+			const status = readinessState(ap, worker);
+			const pending = this.pendingNeighbors?.has(ap.section);
+			const uncertain = this.uncertainNeighbors?.has(ap.section);
+			const interfaces = interfacesOf(ap);
+			const canEnable = typeof ap.section === 'string' && ap.mode === 'ap' && typeof ap.ssid === 'string' && ap.ssid.length > 0 &&
+				this.wirelessWritable === true && canStageWireless() && ap.ownership !== 'readonly' &&
+				allNR(ap, 'capabilities', 'supported') && ap.configuration?.nr !== true && !pending && !uncertain;
+			return E('li', { class: 'wrtmesh-roaming-network wrtmesh-local-network', 'data-section': ap.section }, [
+				E('strong', {}, [ap.ssid || _('SSID unavailable')]),
+				E('span', { class: 'wrtmesh-secondary' }, [interfaces.map(iface => iface.iface).join(' / ') || ap.iface || _('Interface unknown')]),
+				E('span', { class: 'wrtmesh-readiness-state', 'data-state': uncertain ? 'unknown' : pending ? 'pending' : status.state }, [uncertain ? _('Pending save could not be confirmed') : pending ? _('Saved, awaiting apply') : status.text]),
+				!pending && !uncertain && status.reason ? E('span', { class: 'wrtmesh-secondary' }, [status.reason]) : null,
+				E('span', {}, [_('wrtmesh worker: %s').format(typeof worker?.enabled === 'boolean' ? configured(worker.enabled) : _('Cannot confirm'))]),
+				E('span', { class: 'wrtmesh-secondary' }, [_('Neighbor reports (required)'), ' · ',
+					_('Configured: %s').format(configured(ap.configuration?.rrm_neighbor_report)), ' · ',
+					_('API: %s').format(capability(interfaces.length && interfaces.every(iface => iface.capabilities?.nr_api === 'supported') ? 'supported' :
+						interfaces.some(iface => iface.capabilities?.nr_api === 'unsupported') ? 'unsupported' : 'unknown')), ' · ',
+					_('Active: %s').format(active(interfaces.length && interfaces.every(iface => iface.runtime?.nr?.state === 'enabled') ? 'enabled' :
+						interfaces.some(iface => iface.runtime?.nr?.state === 'disabled') ? 'disabled' : 'unknown'))]),
+				interfaces.some(iface => iface.runtime?.nr?.source === 'cached_neighbor_report') ?
+					E('span', { class: 'wrtmesh-secondary' }, [_('Confirmed by recent local collection')]) : null,
+				ap.ownership === 'readonly' ? E('span', { class: 'wrtmesh-secondary' }, [_('Wireless configuration is read-only; adjust its source.')]) : null,
+				E('div', { class: 'wrtmesh-actions' }, [
+					worker && this.networkWritable ? E('button', { class: 'btn', click: () => this.networkEditor(worker.editor || worker) }, [_('Worker settings')]) : null,
+					canEnable ? E('button', { class: 'btn cbi-button-action', click: this.action(() => this.neighborReportEditor(ap)) }, [_('Enable neighbor reports')]) : null
+				]),
+				this.optionalCapabilities(ap)
+			]);
 		});
-		const headers = [_('SSID'), _('Local collection'), _('Radio links')];
-		if (this.networkWritable)
-			headers.push('');
 		return section(_('Local wireless networks'), [
-			E('p', { class: 'cbi-section-descr' }, _('Select SSIDs in each peer to enable roaming assistance. The required local network settings are prepared automatically.')),
-			table(headers, rows, _('No local AP SSIDs configured.'))
+			E('p', { class: 'cbi-section-descr' }, _('The worker switch controls wrtmesh only. Neighbor reports are required for assistance; Beacon, BTM and FT are optional.')),
+			E('div', { class: 'wrtmesh-actions' }, [
+				E('button', { class: 'btn', click: this.action(() => this.recheckReadiness()) }, [_('Recheck readiness')]),
+				E('a', { class: 'btn', href: L.url('admin/network/wireless') }, [_('Wireless settings')])
+			]),
+			this.readinessChecked ? E('p', { class: 'cbi-section-descr' }, [_('Checked at %s').format(new Date(this.readinessChecked).toLocaleTimeString())]) : null,
+			!this.readiness ? E('p', { class: 'cbi-section-descr' }, [_('Readiness information is unavailable; existing Mesh features remain available.')]) : null,
+			this.wirelessWritable === false ? E('p', { class: 'cbi-section-descr' }, [_('Wireless settings are read-only in this session.')]) :
+				this.wirelessWritable !== true || !canStageWireless() ? E('p', { class: 'cbi-section-descr' }, [_('Wireless configuration access could not be confirmed. Use wireless settings.')]) : null,
+			cards.length ? E('ul', { class: 'wrtmesh-roaming-networks wrtmesh-local-networks' }, cards) :
+				E('p', { 'data-state': !this.configuration && !this.readiness ? this.configurationError || 'unavailable' : null },
+					[!this.configuration && !this.readiness ? this.configurationError === 'forbidden' ? _('Permission to view local roaming settings was denied.') :
+						_('Local roaming settings are unavailable.') : _('No local AP SSIDs configured.')])
 		]);
 	},
 
@@ -371,12 +598,15 @@ return view.extend({
 		]);
 	},
 
-	render([data, writable, configuration, networkWritable]) {
+	render([data, writable, configuration, networkWritable, readiness, wirelessWritable]) {
 		this.data = data;
 		this.writable = writable;
 		this.configuration = configuration?.data;
 		this.configurationError = configuration?.error;
 		this.networkWritable = networkWritable;
+		this.readiness = readiness?.data;
+		this.readinessChecked = Date.now();
+		this.wirelessWritable = wirelessWritable === true ? true : wirelessWritable === false ? false : null;
 		this.content = E('div', {}, this.sections(data));
 		poll.add(() => this.refresh().catch(error => this.notify(error)), 15);
 		return E('div', { class: 'cbi-map' }, [

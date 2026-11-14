@@ -10,7 +10,7 @@ Use the signed noarch APK and matching public key from
 firmware, trust the verified release key in `/etc/apk/keys` and install with:
 
 ```sh
-apk add ./wrtmesh-6.4.5-r1.apk
+apk add ./wrtmesh-6.5.0-r1.apk
 ```
 
 Package upgrades preserve local configuration in `/etc/config/wrtmesh` and
@@ -146,6 +146,40 @@ users no longer choose or coordinate their internal IDs. Unsupported older
 peers retain station/topology display where possible; automatic SSID roaming
 shows that a peer upgrade is needed. Migrated pinned legacy relationships
 continue to use their earlier bounded protocol.
+
+### Local readiness and wireless settings
+
+The local AP cards separate the wrtmesh worker switch from wireless configuration,
+available hostapd APIs, and confirmed runtime operation. Ready requires an enabled
+worker and confirmed neighbor-report operation on its mapped interfaces. Missing
+methods, old status fields, failed inspection or ambiguous mappings remain unknown;
+a configured flag alone never proves that it is active. Missing APIs after a
+successful method enumeration are shown as unsupported. Beacon measurement, BSS
+Transition and FT are optional. wrtmesh does not send BTM steering requests or set
+up FT keys or a Mobility Domain. Existing strict collector compatibility is checked
+separately; this view does not extend a driver's or worker's capabilities.
+
+**Recheck readiness** reads local configuration flag metadata and existing runtime
+or fresh local report evidence. It does not call management-enable or neighbor-list
+methods with side effects, and it is not added to the background polling cycle.
+No package-name, board, interface suffix or EAP-feature guess determines k/v/r
+support. Read-only configuration is marked when it can be identified; an ordinary
+file is not proof that a configuration is outside declarative management.
+
+**Enable neighbor reports** is available only with confirmed API support and normal
+LuCI wireless read/write permission. It previews the exact local AP/SSID and stages
+only `wireless.<section>.rrm_neighbor_report=1` through the normal session UCI API.
+It preserves the k aggregate default, Beacon, BTM, FT, security, radios and network
+membership. Existing pending or unsaved wireless edits block staging. Other local
+edits are not flushed. Save does not commit configuration or reload wireless.
+The standard LuCI changes dialog lists all pending session changes; applying is a
+separate user action with the usual rollback flow and can briefly disconnect clients.
+The UI does not implement its own apply, unchecked apply, confirmation, or revert.
+
+FT and other wireless options stay in **Network → Wireless**. If wireless is managed
+declaratively, change its configuration source; wrtmesh adds no Nix-specific protocol
+or ownership override. Permission failures or unavailable inspection keep the rest of
+the Mesh page usable and provide the standard wireless settings link.
 
 ### Declarative provisioning
 

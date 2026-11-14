@@ -60,8 +60,9 @@ const stylesheet = source('wrtmesh.css');
 const luciCore = fs.readFileSync(path.join(luci, 'modules/luci-base/htdocs/luci-static/resources/luci.js'), 'utf8');
 const pathMethod = luciCore.match(/\bpath\(prefix\s*=\s*''\s*,\s*parts\)\s*\{[\s\S]*?\},/);
 const resourceMethod = luciCore.match(/\bresource\(\)\s*\{[\s\S]*?\}/);
-assert(pathMethod && resourceMethod, 'provide the real LuCI path/resource methods');
-scripts.resourceMethods = pathMethod[0].slice(0, -1) + ',' + resourceMethod[0];
+const urlMethod = luciCore.match(/\burl\(\)\s*\{[\s\S]*?\}/);
+assert(pathMethod && resourceMethod && urlMethod, 'provide the real LuCI path/resource methods');
+scripts.resourceMethods = pathMethod[0].slice(0, -1) + ',' + resourceMethod[0] + ',' + urlMethod[0];
 assert(!scripts.wifi.includes('wrtmesh'), 'provide the unpatched LuCI source');
 if (process.env.WRTMESH_LEGACY_WIFI)
 	scripts.legacyWifi = fs.readFileSync(process.env.WRTMESH_LEGACY_WIFI, 'utf8');
@@ -269,7 +270,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 		const modules = {};
 		window.L = {
 			bind: (fn, self, ...args) => fn.bind(self, ...args),
-			...new Function('env', 'return ({' + scripts.resourceMethods + '});')({ resource: '/luci-static/resources' }),
+			...new Function('env', 'return ({' + scripts.resourceMethods + '});')({ resource: '/luci-static/resources', scriptname: '/cgi-bin/luci' }),
 			require: async name => {
 				if (!Object.hasOwn(modules, name))
 					throw new Error('Unexpected module ' + name);
@@ -561,7 +562,7 @@ async function capturePresentation(browser) {
 			await page.evaluate(() => renderManagement());
 			const profiles = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local wireless networks', exact: true }) });
 			assert.equal(await profiles.locator('[data-state="' + (configReadable ? 'unavailable' : 'forbidden') + '"]').count(), 1);
-			assert.equal(await profiles.getByRole('button').count(), 0);
+			assert.equal(await profiles.getByRole('button', { name: 'Recheck readiness', exact: true }).count(), 1);
 			await page.evaluate(() => pollOverview());
 			assert.equal(await page.evaluate(() => mock.configCalls), 1, 'read failure is not repeatedly polled');
 			assert.deepEqual(errors, []);
@@ -587,12 +588,12 @@ async function capturePresentation(browser) {
 			assert.deepEqual(await page.evaluate(() => mock.operations), [{
 				method: 'peer_save', args: ['192.168.50.11', '02:00:00:00:00:11', 'Office', ['Local Wi-Fi']]
 			}], 'peer SSID selection is one authenticated operation without profile IDs or BSSIDs');
-			const network = networks.getByRole('row').filter({ hasText: 'Local Wi-Fi' });
+			const network = networks.locator('.wrtmesh-local-network').filter({ hasText: 'Local Wi-Fi' });
 			assert.match(await network.textContent(), /Enabled/);
 			assert.equal(await page.locator('.wrtmesh-roaming-state[data-state="pending"]').count(), 1);
 			assert.equal(await page.getByText('Roaming enabled', { exact: true }).count(), 0,
 				'saving a selected SSID does not claim an applied report');
-			await network.getByRole('button', { name: 'Settings', exact: true }).click();
+			await network.getByRole('button', { name: 'Worker settings', exact: true }).click();
 			dialog = page.getByRole('dialog');
 			assert.equal(await dialog.locator('details').evaluate(node => node.open), false, 'timing defaults stay collapsed');
 			assert.equal(await dialog.getByLabel('Stable profile ID', { exact: true }).count(), 0);

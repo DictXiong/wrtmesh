@@ -641,3 +641,156 @@ msgstr "部分无线信息已过期"
 
 msgid "Band unknown"
 msgstr "频段未知"
+
+msgid "API: %s"
+msgstr "能力：%s"
+
+msgid "Active: %s"
+msgstr "生效：%s"
+
+msgid "Apply or discard existing wireless changes first."
+msgstr "请先应用或放弃已有的无线更改。"
+
+msgid "Available"
+msgstr "可用"
+
+msgid "BSS Transition (optional)"
+msgstr "BSS Transition（可选）"
+
+msgid "Beacon measurement (optional)"
+msgstr "Beacon 测量（可选）"
+
+msgid "Cannot confirm"
+msgstr "无法确认"
+
+msgid "Checked at %s"
+msgstr "检查时间：%s"
+
+msgid "Configured: %s"
+msgstr "配置：%s"
+
+msgid "Confirmed by recent local collection"
+msgstr "最近的本机采集已确认"
+
+msgid "Could not check pending changes. Use the wireless settings page."
+msgstr "无法检查待应用更改，请前往无线设置。"
+
+msgid "Current neighbor report operation is not confirmed"
+msgstr "尚未确认邻居报告当前已生效"
+
+msgid "Default"
+msgstr "默认"
+
+msgid "Enable neighbor reports"
+msgstr "启用邻居报告"
+
+msgid "Enable the wrtmesh worker for this SSID"
+msgstr "启用此 SSID 的采集与同步"
+
+msgid "Fast Transition (optional)"
+msgstr "快速过渡 FT（可选）"
+
+msgid "If wireless is managed declaratively, adjust its configuration source."
+msgstr "如无线设置由声明配置管理，请从配置来源调整。"
+
+msgid "Interface unknown"
+msgstr "接口未知"
+
+msgid "Neighbor report API unavailable"
+msgstr "邻居报告接口不可用"
+
+msgid "Neighbor report saved"
+msgstr "邻居报告设置已保存"
+
+msgid "Neighbor reports (required)"
+msgstr "邻居报告（必需）"
+
+msgid "Neighbor reports are not active"
+msgstr "邻居报告尚未生效"
+
+msgid "Not enabled"
+msgstr "未开启"
+
+msgid "Only neighbor reporting for this AP will be saved. Beacon, BTM, FT and other wireless settings stay as configured."
+msgstr "只保存此 AP 的邻居报告设置，保留 Beacon、BTM、FT 及其他无线设置。"
+
+msgid "Optional capabilities"
+msgstr "可选能力"
+
+msgid "Permission to change wireless settings was denied."
+msgstr "没有修改无线设置的权限。"
+
+msgid "Readiness information is unavailable; existing Mesh features remain available."
+msgstr "无法取得就绪信息，仍可使用现有 Mesh 展示。"
+
+msgid "Ready"
+msgstr "已就绪"
+
+msgid "Recheck readiness"
+msgstr "重新检查"
+
+msgid "Review pending changes"
+msgstr "查看待应用更改"
+
+msgid "Save creates a pending change. Apply it separately in the standard LuCI changes dialog; applying may briefly disconnect clients."
+msgstr "保存只产生待应用更改，请在 LuCI 更改窗口中另行应用；应用时客户端可能短暂断线。"
+
+msgid "Save pending change"
+msgstr "保存为待应用"
+
+msgid "Saved as pending. Wireless has not been reloaded. Applying may briefly disconnect clients."
+msgstr "已保存为待应用，无线尚未重载。应用时客户端可能短暂断线。"
+
+msgid "Saved, awaiting apply"
+msgstr "已保存，待应用"
+
+msgid "The AP settings changed or support could not be confirmed. Recheck before saving."
+msgstr "AP 设置已变化或无法确认支持，请重新检查后再保存。"
+
+msgid "The setting may be staged, but its pending state could not be confirmed. Review wireless settings."
+msgstr "设置可能已暂存，但无法确认待应用状态，请到无线设置检查。"
+
+msgid "The standard changes dialog includes all pending changes in this session."
+msgstr "标准更改窗口会列出此会话中的全部待应用更改。"
+
+msgid "The worker switch controls wrtmesh only. Neighbor reports are required for assistance; Beacon, BTM and FT are optional."
+msgstr "采集开关只控制 wrtmesh。漫游辅助需要邻居报告，Beacon、BTM 和 FT 均为可选。"
+
+msgid "The wrtmesh worker cannot use this AP mapping"
+msgstr "wrtmesh 工作器无法使用此 AP 的接口映射"
+
+msgid "This controls wrtmesh collection and neighbor synchronization, not wireless k/v/r options."
+msgstr "这里只控制 wrtmesh 的采集和邻居同步，不修改无线 k/v/r 选项。"
+
+msgid "Unsupported"
+msgstr "不支持"
+
+msgid "Wireless configuration is read-only; adjust its source."
+msgstr "无线配置只读，请从配置来源调整。"
+
+msgid "Wireless settings"
+msgstr "无线设置"
+
+msgid "Wireless settings are read-only in this session."
+msgstr "当前会话没有无线配置写权限。"
+
+msgid "Worker settings"
+msgstr "采集设置"
+
+msgid "wrtmesh does not send BTM steering requests. Configure FT and its mobility domain in wireless settings."
+msgstr "wrtmesh 不发送 BTM 引导请求。FT 及其漫游域请在无线设置中配置。"
+
+msgid "wrtmesh worker is disabled"
+msgstr "wrtmesh 采集与同步已停用"
+
+msgid "wrtmesh worker: %s"
+msgstr "采集与同步：%s"
+
+msgid "wrtmesh worker readiness is not confirmed"
+msgstr "尚未确认 wrtmesh 采集与同步可用"
+
+msgid "Wireless configuration access could not be confirmed. Use wireless settings."
+msgstr "无法确认无线配置权限或保存接口，请前往无线设置。"
+
+msgid "Pending save could not be confirmed"
+msgstr "暂存结果无法确认"

@@ -204,7 +204,7 @@ def main():
     if args.installed_root:
         def payload():
             root = args.installed_root.resolve()
-            for name in ["helper.sh", "common.jq", "cli-report.jq", "mesh.uc", "mesh-sample.uc", "mesh-daemon.sh", "migrate-config.sh"]:
+            for name in ["helper.sh", "common.jq", "cli-report.jq", "mesh.uc", "mesh-sample.uc", "readiness.uc", "mesh-daemon.sh", "migrate-config.sh"]:
                 assert (root / "usr/lib/wrtmesh" / name).read_bytes() == (package / "files" / name).read_bytes()
             assert (root / "etc/init.d/wrtmesh").read_bytes() == (package / "files/wrtmesh.init").read_bytes()
             for destination, source in {

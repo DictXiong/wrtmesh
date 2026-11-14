@@ -157,7 +157,7 @@ define Package/wrtmesh/install
 	$(INSTALL_BIN) ./files/wrtmesh.init $(1)/etc/init.d/wrtmesh
 	$(INSTALL_DIR) $(1)/usr/lib/wrtmesh
 	$(INSTALL_BIN) ./files/helper.sh ./files/mesh-daemon.sh ./files/migrate-config.sh $(1)/usr/lib/wrtmesh/
-	$(INSTALL_DATA) ./files/common.jq ./files/cli-report.jq ./files/mesh.uc ./files/mesh-sample.uc $(1)/usr/lib/wrtmesh/
+	$(INSTALL_DATA) ./files/common.jq ./files/cli-report.jq ./files/mesh.uc ./files/mesh-sample.uc ./files/readiness.uc $(1)/usr/lib/wrtmesh/
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode $(1)/usr/share/rpcd/acl.d $(1)/usr/share/luci/menu.d
 	$(INSTALL_DATA) ./files/wrtmesh.uc $(1)/usr/share/rpcd/ucode/wrtmesh.uc
 	$(INSTALL_DATA) ./files/wrtmesh-acl.json $(1)/usr/share/rpcd/acl.d/wrtmesh.json

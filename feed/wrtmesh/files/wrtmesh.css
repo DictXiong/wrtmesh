@@ -380,3 +380,24 @@
 .wrtmesh-ssid-radios {
 	font-size: .9em;
 }
+
+.wrtmesh-readiness-state {
+	font-weight: 600;
+}
+
+.wrtmesh-readiness-options {
+	padding-inline-start: 1.2rem;
+}
+
+.wrtmesh-readiness-options > li {
+	margin-block: .4rem;
+}
+
+.wrtmesh-config-preview {
+	overflow-wrap: anywhere;
+	font-variant-numeric: tabular-nums;
+}
+
+.wrtmesh-local-networks {
+	align-items: start;
+}
