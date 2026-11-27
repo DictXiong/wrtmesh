@@ -357,8 +357,48 @@ load_lan_source() {
  }
 }
 
+monotonic_ms() {
+ local tick idle fraction
+ IFS=' ' read -r tick idle < "$UPTIME" || return 1
+ fraction=${tick#*.}00
+ fraction=${fraction%"${fraction#??}"}
+ printf '%s\n' "$(( ${tick%%.*} * 1000 + (1$fraction - 100) * 10 ))"
+}
+
+request_peer() {
+ local force_https=$1 source=$2 address=$3 resource=$4 connect_timeout=$5 budget=$6 max_bytes=$7
+ local headers=$8 download=$9 started current remaining scheme=http code location
+ [ "$force_https" != 1 ] || scheme=https
+ started=$(monotonic_ms) || return 1
+ while :; do
+  current=$(monotonic_ms) || return 1
+  remaining=$((budget - (current - started)))
+  [ "$remaining" -gt 0 ] || return 1
+  : > "$headers" || return 1
+  set --
+  [ "$scheme" != https ] || set -- --insecure
+  "$CURL" --disable --silent --show-error --fail --noproxy '*' --proto "=$scheme" --max-redirs 0 \
+   "$@" --interface "$source" --connect-timeout "$connect_timeout" \
+   --max-time "$(printf '%d.%03d' "$((remaining / 1000))" "$((remaining % 1000))")" \
+   --max-filesize "$max_bytes" --header 'Cache-Control: no-cache' --dump-header "$headers" \
+   --output "$download" "$scheme://$address$resource" 2>/dev/null || return 1
+  code=$(awk '$1 ~ /^HTTP\/[0-9.]+$/ {code=$2} END {print code}' "$headers")
+  [ "$code" != 200 ] || return 0
+  [ "$scheme" = http ] || return 1
+  case "$code" in 301|302|303|307|308) :;; *) return 1;; esac
+  location=$(awk '
+   tolower($0) ~ /^location:/ { sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t\r]+$/, ""); value=$0; count++ }
+   END { if (count == 1) print value }' "$headers")
+  # Reconstruct the URL after checking the location to stay on the same peer and resource.
+  case "$location" in
+   "https://$address$resource"|"https://$address:443$resource") scheme=https;;
+   *) return 1;;
+  esac
+ done
+}
+
 fetch_peer_one() {
- local revision previous tick source_ip report_count peer_state=${1:-$STATE} endpoint=wrtmesh attempt=0 code
+ local revision previous tick source_ip report_count peer_state=${1:-$STATE} endpoint=wrtmesh attempt=0 code force_https=0
  fetch_reason=ok
  tick=$(now)
  # Cache the actual DHCP LAN source; invalidate on local changes/full audit/failure.
@@ -374,14 +414,13 @@ fetch_peer_one() {
   IFS= read -r endpoint < "$peer_state/endpoint" || endpoint=wrtmesh
  fi
  case "$endpoint" in wrtmesh|xr-roaming) :;; *) endpoint=wrtmesh;; esac
+ if [ "$("$UCI" -q get wrtmesh.global 2>/dev/null || true)" = global ] &&
+    [ "$("$UCI" -q get wrtmesh.global.force_https 2>/dev/null || true)" = 1 ]; then
+  force_https=1
+ fi
  while :; do
-  : > "$peer_state/peer.headers"
-  # Never follow redirects, inherit proxies, use credentials, or accept an arbitrary URL.
-  if "$CURL" --disable --silent --show-error --fail --noproxy '*' --proto '=http' --max-redirs 0 \
-    --interface "$source_ip" \
-    --connect-timeout 2 --max-time 5 --max-filesize 16384 \
-    --header 'Cache-Control: no-cache' --dump-header "$peer_state/peer.headers" \
-    --output "$peer_state/peer.download" "http://$roam_peer/$endpoint/$URI?r=$tick" 2>/dev/null; then
+  if request_peer "$force_https" "$source_ip" "$roam_peer" "/$endpoint/$URI?r=$tick" \
+    2 5000 16384 "$peer_state/peer.headers" "$peer_state/peer.download"; then
    break
   fi
   code=$(awk '$1 ~ /^HTTP\/[0-9.]+$/ {code=$2} END {print code}' "$peer_state/peer.headers")
@@ -830,6 +869,12 @@ run_cycle() {
 
 main() {
  local mode=${1:-} start elapsed delay
+ if [ "$mode" = fetch ]; then
+  shift
+  [ "$#" -eq 9 ] || return 2
+  request_peer "$@"
+  return
+ fi
  [ "$#" -le 2 ] || return 2
  [ "$mode" != profiles ] || { [ "$#" = 1 ] && list_profiles; return; }
  select_profile "${2:-main}" || return 2

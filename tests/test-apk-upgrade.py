@@ -165,11 +165,11 @@ def test(apk, apk_builder, new, old, previous):
                 previous61 = supplied
             elif version.startswith('6.2.'):
                 previous62 = supplied
-            elif version.startswith(('6.3.', '6.4.')):
+            elif version.startswith(('6.3.', '6.4.', '6.5.')):
                 previous63 = supplied
                 canonical_upgrade = 'upgrade-' + '.'.join(version.split('.')[:2])
             else:
-                raise ValueError('--previous-package must be a wrtmesh 6.1, 6.2, 6.3 or 6.4 package')
+                raise ValueError('--previous-package must be a wrtmesh 6.1, 6.2, 6.3, 6.4 or 6.5 package')
         dependency_paths = []
         names = set().union(*(dependencies(apk, package) for package in (legacy, previous61, previous62, previous63, new)))
         for name in sorted(names | {'luci-mod-status'}):
@@ -268,7 +268,7 @@ def main():
     parser.add_argument('--apk-builder', help='Host APK with mkpkg when --apk is an OpenWrt target')
     parser.add_argument('--package', type=Path, required=True)
     parser.add_argument('--old-package', type=Path, help='an xr-roaming 6.0 package')
-    parser.add_argument('--previous-package', type=Path, help='a wrtmesh 6.1/6.2 historical-path or 6.3/6.4 canonical-path package')
+    parser.add_argument('--previous-package', type=Path, help='a wrtmesh 6.1/6.2 historical-path or 6.3/6.4/6.5 canonical-path package')
     args = parser.parse_args()
     test(shlex.split(args.apk), shlex.split(args.apk_builder or args.apk),
          args.package.resolve(), args.old_package.resolve() if args.old_package else None,

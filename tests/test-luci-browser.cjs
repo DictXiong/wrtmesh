@@ -216,6 +216,11 @@ async function harness(browser, { installed = true, data, writable = false, read
 				window.mock.configCalls++;
 				return window.mock.configuration;
 			}
+			if (object === 'wrtmesh' && method === 'transport_save') {
+				window.mock.operations.push({ method, args });
+				window.mock.configuration.force_https = args[0];
+				return { saved: true };
+			}
 			if (object === 'wrtmesh' && method === 'network_save') {
 				window.mock.operations.push({ method, args });
 				const [section, enabled, interval, ttl] = args;
@@ -236,7 +241,7 @@ async function harness(browser, { installed = true, data, writable = false, read
 				return window.mock.networkReloadFail ? { saved: true, error: 'service_reload_failed' } : { saved: true };
 			}
 			if (object === 'session' && method === 'access') {
-				const access = args.includes('peer_save') || args.includes('network_save') ? writable :
+				const access = args.includes('peer_save') || args.includes('network_save') || args.includes('transport_save') ? writable :
 					args.includes('status') ? readable : args.includes('configuration') ? configReadable : true;
 				return expect?.access !== undefined ? access : { access };
 			}
@@ -570,11 +575,21 @@ async function capturePresentation(browser) {
 		}
 		{
 			const { page, errors } = await harness(browser, { data: mesh([peer('11', 'Office', 'fresh', [])]), writable: true });
+			await page.evaluate(() => { mock.configuration.force_https = false; });
 			await page.evaluate(() => renderManagement());
+			const transport = page.getByRole('checkbox', { name: 'Force HTTPS for Mesh peers' });
+			await transport.check();
+			await page.waitForFunction(() => mock.configuration.force_https === true && mock.configCalls === 2);
+			await transport.uncheck();
+			await page.waitForFunction(() => mock.configuration.force_https === false && mock.configCalls === 3);
+			assert.deepEqual(await page.evaluate(() => mock.operations.splice(0)), [
+				{ method: 'transport_save', args: [true] },
+				{ method: 'transport_save', args: [false] }
+			]);
 			const networks = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Local wireless networks', exact: true }) });
 			assert.equal(await networks.getByText('Local Wi-Fi', { exact: true }).count(), 1);
 			assert.equal(await page.getByText('No SSIDs selected for roaming assistance.', { exact: true }).count(), 1);
-			assert.equal(await page.evaluate(() => mock.configCalls), 1);
+			assert.equal(await page.evaluate(() => mock.configCalls), 3);
 			const peersSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Mesh peers', exact: true }) });
 			await peersSection.getByRole('button', { name: 'Edit', exact: true }).click();
 			let dialog = page.getByRole('dialog');

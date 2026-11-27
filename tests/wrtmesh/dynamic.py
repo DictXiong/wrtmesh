@@ -14,7 +14,7 @@ class Dynamic(Cache):
   self.meta=None;super().__init__('main',shell);self.profile=profile
   self.meta={'main':{'iface':'ap-mld0','bands':[0,1,2]},'guest':{'iface':'ap-mld1','bands':[0,1]},'iot':{'iface':'ap-iot','bands':[0]}}
   if extra:self.meta.update({'office':{'iface':'mesh-office','bands':[1,2]},'sensor':{'iface':'ap-xf00abc12','bands':[1]}})
-  self.profiles={};self.wireless={};self.radio={};self.objects={};self.types={};self.peers={}
+  self.profiles={};self.wireless={};self.radio={};self.objects={};self.types={};self.peers={};self.force_https=False
   for old in self.ctrl.iterdir():old.unlink()
   for index,(name,definition) in enumerate(self.meta.items()):
    iface=definition['iface'];mld=len(definition['bands'])>1;section='ssid_'+name;ssid='ESS-'+name
@@ -49,6 +49,8 @@ if "show" in a:
  else:print("network.@device[0]=device")
 elif k=="network.@device[0].name":print("br-lan")
 elif k=="network.@device[0].macaddr":print("02:00:00:00:00:02")
+elif k=="wrtmesh.global":print("global" if v["force_https"] else "")
+elif k=="wrtmesh.global.force_https":print("1" if v["force_https"] else "")
 elif k.startswith("wrtmesh."):
  p=k.split(".");name=p[1]
  if len(p)==2:print("roaming"if name in v["profiles"]else"peer"if name in v["peers"]else"")
@@ -58,13 +60,15 @@ elif k.startswith("wireless."):
 else:sys.exit(1)
 ''')
   (self.bin/'curl').write_text('#!'+py+'\n'+f'''import json,sys,pathlib,urllib.parse,shutil
-a=sys.argv;u=urllib.parse.urlsplit(a[-1]);assert u.scheme=="http"and u.hostname in ["10.24.0.1","10.24.0.10","10.24.0.11"]
+a=sys.argv;u=urllib.parse.urlsplit(a[-1]);assert u.scheme in ("http", "https") and u.hostname in ["10.24.0.1","10.24.0.10","10.24.0.11"]
+assert ("--insecure" in a) == (u.scheme == "https")
 profile="main"if u.path=="/wrtmesh/own.json"else u.path.split("/")[2]
 assert u.path==("/wrtmesh/own.json"if profile=="main"else"/wrtmesh/"+profile+"/own.json")
 suffix=""if u.hostname=="10.24.0.1"else"."+("peer_a"if u.hostname.endswith(".10")else"peer_b")
 p=pathlib.Path({str(self.http)!r})/(profile+suffix+".json")
 with open({str(self.curl_log)!r},"a")as f:f.write(profile+suffix+"\\n")
 if not p.exists():sys.exit(22)
+pathlib.Path(a[a.index("--dump-header")+1]).write_bytes(b"HTTP/1.1 200 OK\\r\\n\\r\\n")
 shutil.copyfile(p,a[a.index("--output")+1])
 ''')
   if ROOT:
@@ -72,7 +76,8 @@ shutil.copyfile(p,a[a.index("--output")+1])
    self.helper.write_text(re.sub(r'^JQ=.*$','JQ='+shlex.quote(str(wrapper)),self.helper.read_text(),flags=re.M))
  def save_multi(self):
   if self.meta is None:return super().save_multi()
-  self.config.write_text(json.dumps({'profiles':self.profiles,'wireless':self.wireless,'types':self.types,'peers':self.peers}))
+  self.config.write_text(json.dumps({'profiles':self.profiles,'wireless':self.wireless,'types':self.types,
+                                     'peers':self.peers,'force_https':self.force_https}))
  def write_peer(self,profile,revision='11111111-1111-4111-8111-111111111111'):
   if self.meta is None:return super().write_peer(profile,revision)
   meta=self.meta[profile];reports=[]
@@ -264,7 +269,17 @@ u=u._replace(path=u.path.replace('/xr-roaming/','/wrtmesh/'))
    endpoint.unlink(missing_ok=True);requests.write_text('');mode.write_text(failure);m.call()
    assert requests.read_text().splitlines()==['/wrtmesh/sensor/own.json'],'only 404 can trigger fallback'
    assert not endpoint.exists(),'invalid responses must not cache endpoint choice'
-  return {'v1_legacy_fallback_404_only':True,'validated_endpoint_cached':True,'no_retry_denied_timeout_invalid':True,'target_C7':bool(ROOT)}
+  mock.write_text(original.replace("log.write(u.path+'\\n')", "log.write(u.scheme+':'+u.path+'\\n')")
+                  .replace("if mode=='legacy'", "if mode=='redirect' and u.scheme=='http':\n"
+                           " headers.write_text('HTTP/1.1 307 Temporary Redirect\\r\\nLocation: https://'+u.netloc+u.path+'?'+u.query+'\\r\\n\\r\\n');sys.exit(0)\n"
+                           "if mode=='legacy'"))
+  mode.write_text('redirect');requests.write_text('');m.call()
+  assert requests.read_text().splitlines()==['http:/wrtmesh/sensor/own.json','https:/wrtmesh/sensor/own.json']
+  assert endpoint.read_text().strip()=='wrtmesh'
+  m.force_https=True;m.save_multi();requests.write_text('');m.call()
+  assert requests.read_text().splitlines()==['https:/wrtmesh/sensor/own.json']
+  return {'v1_legacy_fallback_404_only':True,'validated_endpoint_cached':True,'no_retry_denied_timeout_invalid':True,
+          'same_peer_https_redirect':True,'force_https_never_starts_http':True,'target_C7':bool(ROOT)}
  finally:m.close()
 
 for name,fn in [('dynamic_three_presets_without_extras',default_only),('dynamic_MLO_5_6_and_single_band',multiple_links_and_slo),('dynamic_metadata_rejects_invalid_inputs',metadata_rejection),('dynamic_profile_bounds_and_private_namespace',list_bounds_and_namespace),('dynamic_procd_instances_from_typed_config',dynamic_procd),('dynamic_cached_MLO_and_v1_peer_expiry',dynamic_cache_and_expiry),('dynamic_SLO_fleet_independent_expiry',dynamic_fleet_expiry),('mesh_runtime_peer_overrides',mesh_runtime_peer_overrides),('v1_legacy_HTTP_path_compatibility',legacy_http_path)]:check(name,fn)

@@ -99,9 +99,15 @@ It caps the local inventory at 15 peers and each node snapshot at 256
 stations. Discovery advertises only the service. The HTTP
 identity response includes the bridge MAC, node name and available roaming
 metadata. Station and topology responses require a registered source IPv4
-address on the management LAN. The HTTP exchange uses plaintext and offers no
-cryptographic authentication. Local peer edits go through LuCI's authenticated
+address on the management LAN. Local peer edits go through LuCI's authenticated
 RPC interface. Use the existing firewall policy to isolate the management LAN.
+
+Under **Network → Mesh → Mesh transport**, **Force HTTPS for Mesh peers** sends
+peer requests directly to HTTPS on port 443. It is off by default. In that mode
+requests start with HTTP and can follow one HTTPS redirect to the same address
+and resource on port 443. Both modes accept the peer's existing HTTPS certificate
+without certificate validation. HTTPS encrypts the exchange against passive
+observation. Peer IP/MAC checks on the management LAN remain in place.
 
 ## SSID roaming
 
@@ -241,8 +247,8 @@ the automatically validated per-SSID candidate set, or the old pinned allowlist
 for migrated relationships. Legacy HTTP bodies retain their 16 KiB limit;
 Mesh snapshots and hostapd control replies remain bounded to 64 KiB.
 
-Metadata is fetched over HTTP on the trusted native LAN. Exact peer identity
-and BSSID checks are input validation, not cryptographic peer authentication.
+Metadata uses the same Mesh transport on the management LAN. Peer identity
+and BSSID checks validate the report fields.
 Keep the metadata endpoint inaccessible from the guest network as part of the
 AP's management-input policy. Do not run another neighbor-table controller,
 such as usteer or DAWN, against the same hostapd objects.

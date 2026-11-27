@@ -219,6 +219,14 @@ export function error() {{ return null; }}
         (stage / 'service-fail').unlink()
         assert save_profile('reload_failure') == {'saved': True}
 
+        assert rpc('configuration')['force_https'] is False
+        assert rpc('transport_save', force_https=True) == {'saved': True}
+        assert rpc('configuration')['force_https'] is True
+        assert uci("print(c.get('wrtmesh','global','force_https'));") == '1'
+        assert rpc('transport_save', force_https=False) == {'saved': True}
+        assert rpc('configuration')['force_https'] is False
+        assert uci("print(c.get('wrtmesh','global','force_https'));") == '0'
+
         # Supported old explicit profile settings remain editable even when the
         # radio is absent. Their technical defaults are retained on disable.
         uci("c.set('wrtmesh','main','section','home');"

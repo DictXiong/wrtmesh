@@ -234,10 +234,11 @@ write('local', { seen: now, data: local });
 
 let previous = mesh.read_json(mesh.state + '/peers.json', mesh.cache_limit) ?? {};
 let cache = {};
+let https_only = mesh.force_https(config);
 for (let p in peers) {
 	let addr = p.bridge_mac;
 	let old = previous[addr]?.address == p.address ? previous[addr] : null;
-	let result = mesh.fetch_response(lan, p.address, false);
+	let result = mesh.fetch_response(lan, p.address, false, https_only);
 	let reply = mesh.snapshot(result.data, addr);
 	let identity = mesh.peer_binding(neighbours4, lan, p);
 	if (mesh.mac(result.data?.bridge_mac) && result.data.bridge_mac != addr)

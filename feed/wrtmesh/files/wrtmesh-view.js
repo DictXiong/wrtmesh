@@ -15,6 +15,7 @@ const savePeer = rpc.declare({
 });
 const removePeer = rpc.declare({ object: 'wrtmesh', method: 'remove', params: ['bridge_mac'] });
 const getConfiguration = rpc.declare({ object: 'wrtmesh', method: 'configuration', raise: true });
+const saveTransport = rpc.declare({ object: 'wrtmesh', method: 'transport_save', params: ['force_https'], raise: true });
 const saveNetwork = rpc.declare({
 	object: 'wrtmesh', method: 'network_save', params: ['section', 'enabled', 'interval', 'ttl'], raise: true
 });
@@ -110,6 +111,7 @@ function result(response) {
 		ambiguous_ssid: _('This SSID has multiple local AP configurations. Check the wireless settings.'),
 		duplicate_bssid: _('Peer wireless identity conflicts with this device or another peer.'),
 		save_failed: _('Could not save the local Mesh settings.'),
+		invalid_transport: _('Invalid Mesh transport setting.'),
 		rollback_failed: _('Some local settings changed, but the previous settings could not be restored. Refresh and check the settings.'),
 		identity_unavailable: _('The peer did not return a valid Mesh identity. You can enter its details manually.'),
 		lan_unavailable: _('The management LAN is unavailable.'),
@@ -169,7 +171,8 @@ return view.extend({
 			L.resolveDefault(access('ubus', 'wrtmesh', 'peer_save'), false),
 			loadConfiguration(),
 			L.resolveDefault(access('ubus', 'wrtmesh', 'network_save'), false),
-			loadReadiness(), canConfigureWireless()
+			loadReadiness(), canConfigureWireless(),
+			L.resolveDefault(access('ubus', 'wrtmesh', 'transport_save'), false)
 		]);
 		const data = values[0];
 		const hasClients = data?.local?.stations?.length || data?.peers?.some(peer => peer.data?.stations?.length);
@@ -570,6 +573,29 @@ return view.extend({
 		]);
 	},
 
+	transportSettings() {
+		const enabled = this.configuration?.force_https;
+		if (typeof enabled !== 'boolean')
+			return null;
+		const toggle = input('checkbox', '', { checked: enabled ? '' : null, disabled: this.transportWritable ? null : '' });
+		toggle.addEventListener('change', this.action(async () => {
+			const requested = toggle.checked;
+			toggle.disabled = true;
+			try {
+				result(await saveTransport(requested));
+				this.configuration.force_https = requested;
+				await this.refresh(true);
+			} finally {
+				toggle.checked = this.configuration?.force_https === true;
+				toggle.disabled = !this.transportWritable;
+			}
+		}));
+		return section(_('Mesh transport'), [
+			field(_('Force HTTPS for Mesh peers'), toggle),
+			E('p', { class: 'cbi-section-descr' }, _('When off, start with HTTP and follow an HTTPS redirect from the same peer.'))
+		]);
+	},
+
 	sections(data) {
 		const peers = (data?.peers || []).map(p => {
 			const status = p.online ? _('Online') : _('No fresh snapshot');
@@ -589,6 +615,7 @@ return view.extend({
 		const truncated = data?.local?.truncated || data?.peers?.some(peer => peer.data?.truncated);
 		return E('div', {}, [
 			this.localNetworks(),
+			this.transportSettings(),
 			section(_('Mesh peers'), [table(headers, peers, _('No peers configured.'))]),
 			this.roamingStatus(data),
 			section(_('Mesh topology'), [wrtmesh.topology(data)]),
@@ -601,12 +628,13 @@ return view.extend({
 		]);
 	},
 
-	render([data, writable, configuration, networkWritable, readiness, wirelessWritable]) {
+	render([data, writable, configuration, networkWritable, readiness, wirelessWritable, transportWritable]) {
 		this.data = data;
 		this.writable = writable;
 		this.configuration = configuration?.data;
 		this.configurationError = configuration?.error;
 		this.networkWritable = networkWritable;
+		this.transportWritable = transportWritable;
 		this.readiness = readiness?.data;
 		this.readinessChecked = Date.now();
 		this.wirelessWritable = wirelessWritable === true ? true : wirelessWritable === false ? false : null;

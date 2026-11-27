@@ -794,3 +794,15 @@ msgstr "无法确认无线配置权限或保存接口，请前往无线设置。
 
 msgid "Pending save could not be confirmed"
 msgstr "暂存结果无法确认"
+
+msgid "Mesh transport"
+msgstr "Mesh 传输"
+
+msgid "Force HTTPS for Mesh peers"
+msgstr "强制使用 HTTPS 连接 Mesh 对端"
+
+msgid "When off, start with HTTP and follow an HTTPS redirect from the same peer."
+msgstr "关闭时先使用 HTTP，并跟随同一对端的 HTTPS 跳转。"
+
+msgid "Invalid Mesh transport setting."
+msgstr "Mesh 传输设置无效。"

@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -43,10 +44,12 @@ from pathlib import Path
 from urllib.parse import urlsplit
 args = sys.argv[1:]
 url = urlsplit(args[-1])
-assert url.scheme == 'http' and url.hostname in ('192.168.1.21', '192.168.1.22')
+assert url.scheme in ('http', 'https') and url.hostname in ('192.168.1.21', '192.168.1.22')
+assert args[args.index('--proto') + 1] == '=' + url.scheme
+assert ('--insecure' in args) == (url.scheme == 'https')
 assert url.path in ('/cgi-bin/wrtmesh', '/cgi-bin/xr-mesh') and url.query in ('', 'identity=1')
 with (Path({str(stage)!r}) / 'http-calls.jsonl').open('a') as stream:
-    stream.write(json.dumps({{'host': url.hostname, 'path': url.path, 'query': url.query}}) + '\\n')
+    stream.write(json.dumps({{'host': url.hostname, 'path': url.path, 'query': url.query, 'scheme': url.scheme}}) + '\\n')
 fixture = Path({str(stage)!r}) / (url.hostname + ('-identity' if url.query else '') +
     ('-legacy' if url.path == '/cgi-bin/xr-mesh' else '') + '.json')
 if not fixture.exists():
@@ -56,8 +59,13 @@ if not fixture.exists():
 else:
     response = json.loads(fixture.read_text())
 status = response['status']
-Path(args[args.index('--dump-header') + 1]).write_bytes(f'HTTP/1.1 {{status}} Fixture\\r\\n\\r\\n'.encode())
-if status != 200:
+if url.scheme == 'https' and 'https_status' in response:
+    status = response['https_status']
+headers = f'HTTP/1.1 {{status}} Fixture\\r\\n'
+if 'location' in response:
+    headers += f'Location: {{response["location"]}}\\r\\n'
+Path(args[args.index('--dump-header') + 1]).write_bytes((headers + '\\r\\n').encode())
+if status >= 400:
     sys.exit(22)
 payload = json.dumps(response['data']).encode()
 if len(payload) > int(args[args.index('--max-filesize') + 1]):
@@ -65,6 +73,12 @@ if len(payload) > int(args[args.index('--max-filesize') + 1]):
 Path(args[args.index('--output') + 1]).write_bytes(payload)
 """)
         curl.chmod(0o700)
+        helper = stage / 'helper.sh'
+        helper.write_text((source / 'helper.sh').read_text()
+                          .replace('/usr/bin/curl', str(curl))
+                          .replace('export PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+                                   'export PATH=' + shlex.quote(os.environ['PATH'])))
+        helper.chmod(0o700)
         (config / 'wrtmesh_peers').write_text('# empty\n')
         (config / 'wrtmesh').write_text(f"""
 config roaming 'main'
@@ -78,7 +92,7 @@ config roaming 'main'
             .replace('/tmp/wrtmesh-private/mesh', str(state))
             .replace('/etc/config/', str(config) + '/')
             .replace('/tmp/wrtmesh-public/', str(stage / 'public') + '/')
-            .replace('/usr/bin/curl', str(curl))
+            .replace('/usr/lib/wrtmesh/helper.sh', str(helper))
             .replace('/proc/uptime', str(clock))
             .replace('/etc/init.d/wrtmesh', str(service))
             .replace('return uci.cursor();', f"return uci.cursor('{config}', '{delta}');")
@@ -329,6 +343,31 @@ print(result.status);
 """])
             calls = [json.loads(line)['path'] for line in (stage / 'http-calls.jsonl').read_text().splitlines()]
             assert calls == expected_paths
+
+        def transport(https_only, status, redirect, expected, schemes, https_status=200):
+            (stage / '192.168.1.21.json').write_text(json.dumps({
+                'status': status, 'https_status': https_status, 'location': redirect, 'data': remote,
+            }))
+            calls_path = stage / 'http-calls.jsonl'
+            calls_path.write_text('')
+            output = run(['-e', f"""
+import * as mesh from '{stage}/mesh.uc';
+let result = mesh.fetch_response({{address:'192.168.1.20', mask:24, device:'br-lan.1'}},
+    '192.168.1.21', false, {str(https_only).lower()});
+print(result.status);
+"""])
+            assert output == expected, output
+            actual = [json.loads(line)['scheme'] for line in calls_path.read_text().splitlines()]
+            assert actual == schemes, actual
+
+        transport(False, 200, '', 'ok', ['http'])
+        transport(False, 307, 'https://192.168.1.21/cgi-bin/wrtmesh', 'ok', ['http', 'https'])
+        transport(False, 308, 'https://192.168.1.21:443/cgi-bin/wrtmesh', 'ok', ['http', 'https'])
+        transport(False, 307, 'https://192.168.1.22/cgi-bin/wrtmesh', 'unavailable', ['http'])
+        transport(False, 307, 'https://192.168.1.21:8443/cgi-bin/wrtmesh', 'unavailable', ['http'])
+        transport(False, 307, 'https://192.168.1.21/cgi-bin/xr-mesh', 'unavailable', ['http'])
+        transport(True, 307, '', 'ok', ['https'])
+        transport(True, 200, 'http://192.168.1.21/cgi-bin/wrtmesh', 'unavailable', ['https'], https_status=307)
         at(285)
         assert cgi('192.168.1.21')[0] == 503
         assert rpc('remove', bridge_mac=legacy_mac) == {'saved': True}

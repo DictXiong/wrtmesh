@@ -73,6 +73,7 @@ assert profile in {list(profiles)!r}and u.path==("/wrtmesh/own.json"if profile==
 with open({str(self.curl_log)!r},"a")as f:f.write(json.dumps({{"profile":profile,"url":a[-1],"source":a[a.index("--interface")+1]}})+"\\n")
 p=pathlib.Path({str(self.http)!r})/(profile+".json")
 if not p.exists():sys.exit(22)
+pathlib.Path(a[a.index("--dump-header")+1]).write_bytes(b"HTTP/1.1 200 OK\\r\\n\\r\\n")
 shutil.copyfile(p,a[a.index("--output")+1])
 ''')
   script('ubus',f'''import sys,json,pathlib

@@ -906,7 +906,11 @@ function monotonic_ms() {
 	return value[0] * 1000 + int(value[1] / 1000000);
 }
 
-export function fetch_response(lan, address, identity_only) {
+export function force_https(config) {
+	return config.get('wrtmesh', 'global') == 'global' && config.get('wrtmesh', 'global', 'force_https') == '1';
+}
+
+export function fetch_response(lan, address, identity_only, https_only) {
 	if (!on_lan(lan, address))
 		return { status: 'unreachable' };
 	let directory = fs.mkdtemp('/tmp/wrtmesh-fetch.XXXXXX');
@@ -926,11 +930,9 @@ export function fetch_response(lan, address, identity_only) {
 			if (remaining <= 0)
 				break;
 			fs.unlink(headers);
-			let rc = system(['/usr/bin/curl', '--disable', '--silent', '--fail', '--noproxy', '*',
-				'--proto', '=http', '--interface', lan.address, '--connect-timeout', '1',
-				'--max-time', sprintf('%.3f', min(2000, remaining) / 1000),
-				'--max-filesize', sprintf('%d', max_bytes), '--dump-header', headers, '--output', file,
-				'http://' + address + path + query], remaining);
+			let rc = system(['/usr/lib/wrtmesh/helper.sh', 'fetch', https_only ? '1' : '0',
+				lan.address, address, path + query, '1', sprintf('%d', min(2000, remaining)),
+				sprintf('%d', max_bytes), headers, file], remaining);
 			let code = int(match(fs.readfile(headers, 128) ?? '', /^HTTP\/[0-9.]+ ([0-9]{3})[[:space:]]/)?.[1]);
 			if (!rc && code == 200)
 				result = { status: 'ok', data: read_json(file, max_bytes) };
@@ -954,8 +956,8 @@ export function fetch_response(lan, address, identity_only) {
 	return result;
 }
 
-export function fetch(lan, address, identity_only) {
-	return fetch_response(lan, address, identity_only).data;
+export function fetch(lan, address, identity_only, https_only) {
+	return fetch_response(lan, address, identity_only, https_only).data;
 }
 
 export function path(raw) {

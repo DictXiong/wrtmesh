@@ -77,6 +77,7 @@ function configuration() {
 	return {
 		profiles: mesh.local_profiles(ctx.config, ssids), ssids,
 		networks: mesh.local_networks(ctx.config, ctx.bus),
+		force_https: mesh.force_https(ctx.config),
 		limits: {
 			profiles: 17, max_links: 3,
 			interval: { min: 30, max: 300, default: 30 },
@@ -109,6 +110,18 @@ function finish_commit(config, name) {
 	if (!config.commit(name))
 		return { error: 'save_failed' };
 	return mesh.reconcile() ? { saved: true } : { saved: true, error: 'service_reload_failed' };
+}
+
+function transport_save(args) {
+	if (type(args.force_https) != 'bool')
+		return { error: 'invalid_transport' };
+	let config = mesh.cursor();
+	let section = config.get('wrtmesh', 'global');
+	if ((section && section != 'global') ||
+	    (!section && !config.set('wrtmesh', 'global', 'global')) ||
+	    !config.set('wrtmesh', 'global', 'force_https', args.force_https ? '1' : '0'))
+		return { error: 'save_failed' };
+	return finish_commit(config, 'wrtmesh');
 }
 
 // Owned UCI files only. If the second commit fails, restore both raw files
@@ -398,7 +411,7 @@ function discover() {
 
 function identify(args) {
 	let ctx = context();
-	let data = mesh.fetch(ctx.lan, args.address, true);
+	let data = mesh.fetch(ctx.lan, args.address, true, mesh.force_https(ctx.config));
 	let addr = mesh.mac(data?.bridge_mac);
 	if (data?.version != 1 || !addr || addr == ctx.node.bridge_mac)
 		return { error: 'identity_unavailable' };
@@ -485,6 +498,7 @@ return {
 	wrtmesh: {
 		status: { call: status },
 		configuration: { call: configuration },
+		transport_save: { args: { force_https: false }, call: req => mutate(transport_save, req.args) },
 		readiness: { call: readiness },
 		network_save: { args: { section: '', enabled: false, interval: 30, ttl: 180 }, call: req => mutate(network_save, req.args) },
 		peer_save: { args: { address: '', bridge_mac: '', name: '', ssids: [] }, call: req => mutate(peer_save, req.args) },

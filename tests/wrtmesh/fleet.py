@@ -45,6 +45,7 @@ assert u.scheme=="http"and u.hostname in mapping and u.path=="/wrtmesh/iot/own.j
 with open({str(self.curl_log)!r},"a")as f:f.write(mapping[u.hostname]+"\\n")
 p=pathlib.Path({str(self.http)!r})/(mapping[u.hostname]+".json")
 if not p.exists():sys.exit(22)
+pathlib.Path(a[a.index("--dump-header")+1]).write_bytes(b"HTTP/1.1 200 OK\\r\\n\\r\\n")
 shutil.copyfile(p,a[a.index("--output")+1])
 ''')
  def save_multi(self):
